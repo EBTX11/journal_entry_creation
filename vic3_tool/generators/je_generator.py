@@ -2,7 +2,7 @@ import os
 
 TEMPLATE_PATH = os.path.join(
     os.path.dirname(__file__),
-    "../templates/je_template.txt"
+    "../templates/je_templates.txt"
 )
 
 def generate_je_block(je, num_buttons, conditions="", immediate=""):
