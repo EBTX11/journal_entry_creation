@@ -5,6 +5,29 @@ import re
 
 manage_button_fields = []
 
+
+def find_je_block(content, key):
+    start_match = re.search(rf"{re.escape(key)}\s*=\s*\{{", content)
+    if not start_match:
+        return None
+
+    start = start_match.start()
+    i = start_match.end() - 1  # position sur "{"
+    depth = 0
+
+    while i < len(content):
+        char = content[i]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return (start, i + 1)
+        i += 1
+
+    return None
+
+
 def build_manage_tab(parent, path_var, tag_var):
     frame = tk.Frame(parent)
 
@@ -50,10 +73,11 @@ def build_manage_tab(parent, path_var, tag_var):
         with open(je_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        block = re.search(rf"{key}.*?\n\}}", content, re.DOTALL)
+        block_range = find_je_block(content, key)
+        block = content[block_range[0]:block_range[1]] if block_range else None
 
         if block:
-            year = re.search(r"game_date >= (\d+)", block.group())
+            year = re.search(r"game_date >= (\d+)", block)
             if year:
                 year_entry.delete(0, tk.END)
                 year_entry.insert(0, year.group(1))
@@ -75,7 +99,7 @@ def build_manage_tab(parent, path_var, tag_var):
                 desc_entry.delete("1.0", tk.END)
                 desc_entry.insert("1.0", desc.group(1).replace("\\n\\n", "\n\n"))
 
-        buttons = re.findall(rf"{key}_button_(\d+)", content)
+        buttons = re.findall(rf"{re.escape(key)}_button_(\d+)", block or "")
         count = max([int(x) for x in buttons], default=0)
 
         for i in range(1, count + 1):
@@ -149,7 +173,11 @@ def build_manage_tab(parent, path_var, tag_var):
 }}
 """
 
-        content = re.sub(rf"{key}.*?\n\}}", new_block, content, flags=re.DOTALL)
+        block_range = find_je_block(content, key)
+        if block_range:
+            content = content[:block_range[0]] + new_block + content[block_range[1]:]
+        else:
+            content += "\n" + new_block
 
         with open(je_path, "w", encoding="utf-8") as f:
             f.write(content)
