@@ -1,25 +1,31 @@
-{KEY} = {
+{KEY} = {{
     icon = "gfx/interface/icons/event_icons/{KEY}.dds"
 
     group = je_group_ef
     should_be_pinned_by_default = yes
 
-    is_shown_when_inactive = {
+    is_shown_when_inactive = {{
         exists = c:{TAG}
         c:{TAG} ?= THIS
-    }
+    }}
 
-    possible = {
+    possible = {{
         game_date >= {YEAR}.1.1
         {CONDITIONS}
-    }
+    }}
 
-    immediate = {
+    immediate = {{
         {IMMEDIATE}
-    }
+    }}
 
-    complete = {
-    }
+    complete = {{
+    }}
+
+{STATUS_DESC}
+{PROGRESS_BAR_LINK}
 
 {BUTTONS}
-}
+{ON_MONTHLY}
+{ON_YEARLY}
+{MODIFIERS}
+}}
