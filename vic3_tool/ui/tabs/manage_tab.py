@@ -47,7 +47,8 @@ def build_manage_tab(parent, path_var, tag_var):
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        matches = re.findall(rf"{tag}_je_\d+", content)
+        safe_tag = re.escape(tag)
+        matches = re.findall(rf"{safe_tag}_je_\d+", content)
 
         for m in sorted(set(matches)):
             je_listbox.insert(tk.END, m)
@@ -63,6 +64,7 @@ def build_manage_tab(parent, path_var, tag_var):
             return
 
         key = je_listbox.get(selection[0])
+        safe_key = re.escape(key)
         tag = tag_var.get().upper()
         base_path = path_var.get()
 
@@ -88,8 +90,8 @@ def build_manage_tab(parent, path_var, tag_var):
             with open(loc_path, "r", encoding="utf-8") as f:
                 loc = f.read()
 
-            title = re.search(rf"{key}:0 \"(.*?)\"", loc)
-            desc = re.search(rf"{key}_reason:0 \"(.*?)\"", loc)
+            title = re.search(rf"{safe_key}:0 \"(.*?)\"", loc)
+            desc = re.search(rf"{safe_key}_reason:0 \"(.*?)\"", loc)
 
             if title:
                 title_entry.delete(0, tk.END)
@@ -117,9 +119,10 @@ def build_manage_tab(parent, path_var, tag_var):
             if os.path.exists(loc_path):
                 btn_key = f"{key}_button_{i}"
 
-                name_match = re.search(rf"{btn_key}:0 \"(.*?)\"", loc)
-                desc_match = re.search(rf"{btn_key}_desc:0 \"(.*?)\"", loc)
-                tt_match = re.search(rf"{btn_key}_tt:0 \"(.*?)\"", loc)
+                safe_btn_key = re.escape(btn_key)
+                name_match = re.search(rf"{safe_btn_key}:0 \"(.*?)\"", loc)
+                desc_match = re.search(rf"{safe_btn_key}_desc:0 \"(.*?)\"", loc)
+                tt_match = re.search(rf"{safe_btn_key}_tt:0 \"(.*?)\"", loc)
 
                 if name_match:
                     name.insert(0, name_match.group(1))
@@ -136,6 +139,7 @@ def build_manage_tab(parent, path_var, tag_var):
             return
 
         key = je_listbox.get(selection[0])
+        safe_key = re.escape(key)
         tag = tag_var.get().upper()
         base_path = path_var.get()
 
@@ -193,14 +197,14 @@ def build_manage_tab(parent, path_var, tag_var):
             loc = "l_english:\n"
 
         # remove old JE loc
-        loc = re.sub(rf"{key}:0 \".*?\"\n", "", loc)
-        loc = re.sub(rf"{key}_reason:0 \".*?\"\n", "", loc)
+        loc = re.sub(rf"{safe_key}:0 \".*?\"\n", "", loc)
+        loc = re.sub(rf"{safe_key}_reason:0 \".*?\"\n", "", loc)
 
         # remove old button loc
         for i in range(1, 20):
-            loc = re.sub(rf"{key}_button_{i}.*\n", "", loc)
-            loc = re.sub(rf"{key}_button_{i}_desc.*\n", "", loc)
-            loc = re.sub(rf"{key}_button_{i}_tt.*\n", "", loc)
+            loc = re.sub(rf"{safe_key}_button_{i}.*\n", "", loc)
+            loc = re.sub(rf"{safe_key}_button_{i}_desc.*\n", "", loc)
+            loc = re.sub(rf"{safe_key}_button_{i}_tt.*\n", "", loc)
 
         # add new JE loc
         loc += f'  {key}:0 "{title}"\n'
