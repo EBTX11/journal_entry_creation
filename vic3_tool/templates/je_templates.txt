@@ -4,26 +4,26 @@
     group = je_group_ef
     should_be_pinned_by_default = yes
 
-    is_shown_when_inactive = {{
-        exists = c:{TAG}
-        c:{TAG} ?= THIS
-    }}
-
+{IS_SHOWN}
     possible = {{
         game_date >= {YEAR}.1.1
-        {CONDITIONS}
-    }}
+{POSSIBLE_COND}    }}
 
     immediate = {{
         {IMMEDIATE}
     }}
 
     complete = {{
+{COMPLETE_COND}    }}
+
+{FAIL}
+    on_complete = {{
+        {ON_COMPLETE}
     }}
 
+{ON_FAIL}
 {STATUS_DESC}
 {PROGRESS_BAR_LINK}
-
 {BUTTONS}
 {ON_MONTHLY}
 {ON_YEARLY}

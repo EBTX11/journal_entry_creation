@@ -30,11 +30,16 @@ def create_full_je(
     monthly_empty=False,
     yearly=False,
     modifiers=False,
+    on_fail=False,
+    is_shown=None,
+    possible_conditions=None,
+    complete_conditions=None,
+    fail_conditions=None,
 ):
     je_path = os.path.join(base_path, "common/journal_entries", f"{tag}.txt")
     btn_path = os.path.join(base_path, "common/scripted_buttons", f"{tag}.txt")
     loc_path = os.path.join(base_path, "localization/english", "01_hmmf_je_localization_l_english.yml")
-    pb_path  = os.path.join(base_path, "common/scripted_progress_bars", "mmmf_progressbar.txt")
+    pb_path  = os.path.join(base_path, "common/scripted_progress_bars", "hmmf_progressbar.txt")
 
     ensure_folder(os.path.dirname(je_path))
     ensure_folder(os.path.dirname(btn_path))
@@ -53,60 +58,30 @@ def create_full_je(
     # -------- OPTIONS POUR LE TEMPLATE --------
 
     options = {
-        "buttons":       num_buttons,
-        "progress_bars": progress_bars,
-        "conditions":    "",
-        "status_desc":   status_desc,
-        "monthly_empty": monthly_empty,
-        "yearly":        yearly,
-        "modifiers":     modifiers,
+        "buttons":             num_buttons,
+        "progress_bars":       progress_bars,
+        "status_desc":         status_desc,
+        "monthly_empty":       monthly_empty,
+        "yearly":              yearly,
+        "modifiers":           modifiers,
+        "on_fail":             on_fail,
+        "is_shown":            is_shown,
+        "possible_conditions": possible_conditions,
+        "complete_conditions": complete_conditions,
+        "fail_conditions":     fail_conditions,
     }
 
     # -------- WRITE FILES --------
 
-    append_to_file(je_path, generate_je_block(je, options))
+    append_to_file(je_path, "\n" + generate_je_block(je, options))
 
     if buttons_data:
         append_to_file(btn_path, generate_buttons(je, buttons_data))
 
-    append_to_file(loc_path, generate_localization(je, buttons_data, progress_bars, status_desc))
+    append_to_file(loc_path, "\n" + generate_localization(je, buttons_data, progress_bars, status_desc))
 
     # -------- PROGRESS BAR FILE --------
 
     if progress_bars:
-        pb_content = read_file(pb_path) if os.path.exists(pb_path) else ""
-        new_pb_blocks = ""
-        new_monthly_entries = ""
-
         for pb in progress_bars:
-            new_pb_blocks += generate_progress_bar(pb)
-            new_monthly_entries += f"""
-            je:{je.key} ?= {{
-                set_bar_progress = {{
-                    value = 0
-                    name = {pb['key']}
-                }}
-            }}
-"""
-
-        # Fusionner dans on_monthly_pulse existant ou en créer un nouveau
-        pulse_marker = "on_monthly_pulse = {"
-        if pulse_marker in pb_content:
-            effect_marker = "        effect = {"
-            insert_point = pb_content.find(effect_marker) + len(effect_marker)
-            pb_content = pb_content[:insert_point] + new_monthly_entries + pb_content[insert_point:]
-            # Réécrire le fichier entier avec fusion
-            with open(pb_path, "w", encoding="utf-8") as f:
-                f.write(pb_content)
-            # Ajouter les nouveaux blocs de définition
-            with open(pb_path, "a", encoding="utf-8") as f:
-                f.write(new_pb_blocks)
-        else:
-            # Premier on_monthly_pulse : tout écrire d'un coup
-            full_block = new_pb_blocks + f"""
-on_monthly_pulse = {{
-    effect = {{{new_monthly_entries}
-    }}
-}}
-"""
-            append_to_file(pb_path, full_block)
+            append_to_file(pb_path, generate_progress_bar(pb))

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -l \"scripted_progress_bar\" \"D:/SteamLibrary/steamapps/common/Victoria 3/game/common/journal_entries/\"*.txt)"
+    ]
+  }
+}

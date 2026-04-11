@@ -10,6 +10,23 @@ def generate_je_block(je, options):
     with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
         template = f.read()
 
+    # -------- IS_SHOWN_WHEN_INACTIVE --------
+
+    is_shown_conditions = options.get("is_shown")
+    if is_shown_conditions is not None:
+        # Les conditions sont déjà formatées et indentées par l'UI
+        lines = "\n".join(is_shown_conditions) if is_shown_conditions else ""
+        is_shown_block = f"""    is_shown_when_inactive = {{
+{lines}
+    }}
+"""
+    else:
+        is_shown_block = f"""    is_shown_when_inactive = {{
+        exists = c:{je.tag}
+        c:{je.tag} ?= THIS
+    }}
+"""
+
     # -------- STATUS DESC --------
 
     status_block = ""
@@ -40,7 +57,10 @@ def generate_je_block(je, options):
     monthly_progress = ""
 
     if options.get("progress_bars"):
-        progress_link = f"    scripted_progress_bar = {options['progress_bars'][0]['key']}"
+        progress_link = "\n".join(
+            f"    scripted_progress_bar = {pb['key']}"
+            for pb in options["progress_bars"]
+        )
 
         monthly_progress = """
     on_monthly_pulse = {
@@ -96,14 +116,48 @@ def generate_je_block(je, options):
         for i in range(1, options["buttons"] + 1):
             buttons += f"    scripted_button = {je.key}_button_{i}\n"
 
+    # -------- POSSIBLE (conditions supplémentaires) --------
+
+    possible_lines = options.get("possible_conditions")
+    possible_cond_str = ("\n".join(possible_lines) + "\n") if possible_lines else ""
+
+    # -------- COMPLETE --------
+
+    complete_lines = options.get("complete_conditions")
+    complete_cond_str = ("\n".join(complete_lines) + "\n") if complete_lines else ""
+
+    # -------- FAIL --------
+
+    fail_block = ""
+    fail_lines = options.get("fail_conditions")
+    if fail_lines is not None:
+        inner = ("\n".join(fail_lines) + "\n") if fail_lines else ""
+        fail_block = f"""    fail = {{
+{inner}    }}
+"""
+
+    # -------- ON_COMPLETE / ON_FAIL --------
+
+    on_fail_block = ""
+    if options.get("on_fail"):
+        on_fail_block = """
+    on_fail = {
+    }
+"""
+
     return template.format(
         KEY=je.key,
         TAG=je.tag,
         YEAR=je.year,
-        CONDITIONS=options.get("conditions", ""),
+        IS_SHOWN=is_shown_block,
+        POSSIBLE_COND=possible_cond_str,
+        COMPLETE_COND=complete_cond_str,
         STATUS_DESC=status_block,
         PROGRESS_BAR_LINK=progress_link,
         IMMEDIATE="",
+        FAIL=fail_block,
+        ON_COMPLETE="",
+        ON_FAIL=on_fail_block,
         ON_MONTHLY=monthly_progress if monthly_progress else monthly_empty,
         ON_YEARLY=yearly_block,
         MODIFIERS=modifiers_block,

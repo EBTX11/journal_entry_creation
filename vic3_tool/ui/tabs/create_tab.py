@@ -2,6 +2,43 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from vic3_tool.main import create_full_je
 
+# (label, template_format, [champs])
+# Les accolades littérales dans le template sont doublées pour .format()
+CONDITION_SPECS = [
+    # --- Pays ---
+    ("Pays Exist/This",         "AND = {{\n    exists = c:{v1}\n    c:{v1} ?= THIS\n}}",    ["TAG"]),
+    ("Pays existe",             "exists = c:{v1}",                                          ["TAG"]),
+    ("Est le pays (scope)",     "c:{v1} ?= THIS",                                           ["TAG"]),
+    ("Pays n'existe pas",       "NOT = {{ exists = c:{v1} }}",                               ["TAG"]),
+    # --- Variables ---
+    ("A la variable",           "has_variable = {v1}",                                      ["Variable"]),
+    ("N'a pas la variable",     "NOT = {{ has_variable = {v1} }}",                           ["Variable"]),
+    ("Pays a la variable",      "c:{v1} = {{ has_variable = {v2} }}",                        ["TAG", "Variable"]),
+    # --- Lois ---
+    ("Loi active",              "has_law_or_variant = law_type:{v1}",                        ["Loi"]),
+    ("Loi non active",          "NOT = {{ has_law_or_variant = law_type:{v1} }}",             ["Loi"]),
+    # --- État ---
+    ("Est humain",              "is_ai = no",                                                []),
+    ("Est IA",                  "is_ai = yes",                                               []),
+    ("En guerre",               "is_at_war = yes",                                           []),
+    ("Pas en guerre",           "is_at_war = no",                                            []),
+    # --- Objectif ---
+    ("Objectif atteint",        "is_goal_complete = yes",                                    []),
+    ("JE objectif atteint",     "scope:journal_entry = {{ is_goal_complete = yes }}",         []),
+    # --- Temps ---
+    ("Date >=",                 "game_date >= {v1}.1.1",                                     ["Année"]),
+    ("Date <",                  "game_date < {v1}.1.1",                                      ["Année"]),
+    # --- Libre ---
+    ("Texte libre",             "{v1}",                                                      ["Condition"]),
+]
+CONDITION_NAMES = [s[0] for s in CONDITION_SPECS]
+CONDITION_MAP   = {s[0]: (s[1], s[2]) for s in CONDITION_SPECS}
+
+DLC_OPTIONS = [
+    "", "has_mod_hmm_1804", "has_mod_hmm_1837", "has_mod_hmm_1861",
+    "has_mod_hmm_1871", "has_mod_hmm_1890", "has_mod_hmm_1919",
+]
+
 
 def build_create_tab(notebook, path_var, tag_var):
     frame = ttk.Frame(notebook)
@@ -45,17 +82,26 @@ def build_create_tab(notebook, path_var, tag_var):
     canvas.pack(side="left", fill="both", expand=True)
     scrollbar.pack(side="right", fill="y")
 
-    # -------- état global des features --------
-
-    features_data = {}  # stocke les widgets de chaque feature
+    # -------- initialisation features_data AVANT tout --------
+    features_data = {
+        "is_shown":      {"enabled": tk.BooleanVar(value=False), "rows": [], "dlc": None},
+        "possible":      {"enabled": tk.BooleanVar(value=False), "rows": []},
+        "complete":      {"enabled": tk.BooleanVar(value=False), "rows": []},
+        "fail":          {"enabled": tk.BooleanVar(value=False), "rows": []},
+        "buttons":       {"enabled": tk.BooleanVar(value=False), "num": None, "rows": []},
+        "status_desc":   {"enabled": tk.BooleanVar(value=False), "rows": []},
+        "progress_bars": {"enabled": tk.BooleanVar(value=False), "rows": []},
+        "monthly_empty": {"enabled": tk.BooleanVar(value=False)},
+        "yearly":        {"enabled": tk.BooleanVar(value=False)},
+        "modifiers":     {"enabled": tk.BooleanVar(value=False)},
+        "on_fail":       {"enabled": tk.BooleanVar(value=False)},
+    }
 
     def make_feature(parent, feat_key, feat_label, build_config_fn):
-        """Crée une ligne feature : [checkbox Oui/Non] + zone config dépliable."""
         row_frame = ttk.Frame(parent)
         row_frame.pack(fill="x", padx=4, pady=2)
-
-        enabled_var = tk.BooleanVar(value=False)
         config_frame = ttk.Frame(parent)
+        enabled_var = features_data[feat_key]["enabled"]
 
         def toggle():
             if enabled_var.get():
@@ -63,71 +109,81 @@ def build_create_tab(notebook, path_var, tag_var):
             else:
                 config_frame.pack_forget()
 
-        chk = tk.Checkbutton(row_frame, text=feat_label,
-                             variable=enabled_var, command=toggle,
-                             anchor="w")
-        chk.pack(side="left")
-
+        tk.Checkbutton(row_frame, text=feat_label,
+                       variable=enabled_var, command=toggle,
+                       anchor="w").pack(side="left")
         build_config_fn(config_frame, feat_key)
-        features_data[feat_key] = {"enabled": enabled_var}
 
     # ============================================================
     # FEATURE : BOUTONS
     # ============================================================
 
-    buttons_rows = []
-
     def build_buttons_config(parent, key):
         tk.Label(parent, text="Nombre de boutons :").pack(anchor="w")
-
         num_var = tk.IntVar(value=1)
+        features_data["buttons"]["num"] = num_var
         btn_rows_frame = ttk.Frame(parent)
 
         def refresh_buttons(*_):
+            saved = [
+                {"name": r["name"].get(), "desc": r["desc"].get(),
+                 "tt1": r["tt1"].get(), "tt2": r["tt2"].get(),
+                 "cooldown": r["cooldown"].get()}
+                for r in features_data["buttons"]["rows"]
+            ]
             for w in btn_rows_frame.winfo_children():
                 w.destroy()
-            buttons_rows.clear()
+            features_data["buttons"]["rows"].clear()
             for i in range(1, num_var.get() + 1):
-                row = ttk.Frame(btn_rows_frame)
-                row.pack(fill="x", pady=1)
-                tk.Label(row, text=f"Bouton {i} — Nom").pack(side="left")
-                nv = tk.StringVar()
-                tk.Entry(row, textvariable=nv, width=16).pack(side="left", padx=4)
-                tk.Label(row, text="Desc").pack(side="left")
-                dv = tk.StringVar()
-                tk.Entry(row, textvariable=dv, width=20).pack(side="left", padx=4)
-                tk.Label(row, text="TT1").pack(side="left")
-                t1 = tk.StringVar()
-                tk.Entry(row, textvariable=t1, width=12).pack(side="left", padx=2)
-                tk.Label(row, text="TT2").pack(side="left")
-                t2 = tk.StringVar()
-                tk.Entry(row, textvariable=t2, width=12).pack(side="left", padx=2)
-                buttons_rows.append({"name": nv, "desc": dv, "tt1": t1, "tt2": t2})
+                lf = ttk.LabelFrame(btn_rows_frame, text=f"Bouton {i}")
+                lf.pack(fill="x", pady=2)
 
-        spin = tk.Spinbox(parent, from_=1, to=10, textvariable=num_var,
-                          width=4, command=refresh_buttons)
-        spin.pack(anchor="w")
+                row1 = ttk.Frame(lf)
+                row1.pack(fill="x", pady=1)
+                tk.Label(row1, text="Nom").pack(side="left")
+                nv = tk.StringVar()
+                tk.Entry(row1, textvariable=nv, width=16).pack(side="left", padx=4)
+                tk.Label(row1, text="Desc").pack(side="left")
+                dv = tk.StringVar()
+                tk.Entry(row1, textvariable=dv, width=20).pack(side="left", padx=4)
+
+                row2 = ttk.Frame(lf)
+                row2.pack(fill="x", pady=1)
+                tk.Label(row2, text="TT1").pack(side="left")
+                t1 = tk.StringVar()
+                tk.Entry(row2, textvariable=t1, width=14).pack(side="left", padx=2)
+                tk.Label(row2, text="TT2").pack(side="left")
+                t2 = tk.StringVar()
+                tk.Entry(row2, textvariable=t2, width=14).pack(side="left", padx=2)
+                tk.Label(row2, text="Cooldown (jours)").pack(side="left", padx=(8, 0))
+                cd = tk.StringVar()
+                tk.Entry(row2, textvariable=cd, width=6).pack(side="left", padx=2)
+
+                if i - 1 < len(saved):
+                    s = saved[i - 1]
+                    nv.set(s["name"]); dv.set(s["desc"])
+                    t1.set(s["tt1"]);  t2.set(s["tt2"]); cd.set(s["cooldown"])
+
+                features_data["buttons"]["rows"].append({"name": nv, "desc": dv, "tt1": t1, "tt2": t2, "cooldown": cd})
+
+        tk.Spinbox(parent, from_=1, to=10, textvariable=num_var,
+                   width=4, command=refresh_buttons).pack(anchor="w")
         btn_rows_frame.pack(fill="x")
         refresh_buttons()
-        features_data["buttons"]["num"] = num_var
-        features_data["buttons"]["rows"] = buttons_rows
 
     # ============================================================
     # FEATURE : STATUS DESC
     # ============================================================
 
-    status_rows = []
-
     def build_status_config(parent, key):
         tk.Label(parent, text="Nombre de status_desc (min 2) :").pack(anchor="w")
-
         num_var = tk.IntVar(value=2)
         status_rows_frame = ttk.Frame(parent)
 
         def refresh_status(*_):
             for w in status_rows_frame.winfo_children():
                 w.destroy()
-            status_rows.clear()
+            features_data["status_desc"]["rows"].clear()
             n = max(2, num_var.get())
             for i in range(1, n + 1):
                 row = ttk.Frame(status_rows_frame)
@@ -135,31 +191,26 @@ def build_create_tab(notebook, path_var, tag_var):
                 tk.Label(row, text=f"Status desc {i} — Texte :").pack(side="left")
                 sv = tk.StringVar()
                 tk.Entry(row, textvariable=sv, width=36).pack(side="left", padx=4)
-                status_rows.append(sv)
+                features_data["status_desc"]["rows"].append(sv)
 
-        spin = tk.Spinbox(parent, from_=2, to=10, textvariable=num_var,
-                          width=4, command=refresh_status)
-        spin.pack(anchor="w")
+        tk.Spinbox(parent, from_=2, to=10, textvariable=num_var,
+                   width=4, command=refresh_status).pack(anchor="w")
         status_rows_frame.pack(fill="x")
         refresh_status()
-        features_data["status_desc"]["rows"] = status_rows
 
     # ============================================================
     # FEATURE : PROGRESS BARS
     # ============================================================
 
-    pb_rows = []
-
     def build_pb_config(parent, key):
         tk.Label(parent, text="Nombre de progress bars :").pack(anchor="w")
-
         num_var = tk.IntVar(value=1)
         pb_rows_frame = ttk.Frame(parent)
 
         def refresh_pb(*_):
             for w in pb_rows_frame.winfo_children():
                 w.destroy()
-            pb_rows.clear()
+            features_data["progress_bars"]["rows"].clear()
             for i in range(1, num_var.get() + 1):
                 lf = ttk.LabelFrame(pb_rows_frame, text=f"Progress Bar {i}")
                 lf.pack(fill="x", pady=3)
@@ -176,10 +227,14 @@ def build_create_tab(notebook, path_var, tag_var):
                 row2 = ttk.Frame(lf)
                 row2.pack(fill="x", pady=1)
                 color_var = tk.StringVar(value="default_green = yes")
-                tk.Radiobutton(row2, text="Vert (default_green)",
-                               variable=color_var, value="default_green = yes").pack(side="left")
-                tk.Radiobutton(row2, text="Rouge (default_bad)",
-                               variable=color_var, value="default_bad = yes").pack(side="left")
+                for label, val in [
+                    ("Vert",           "default_green = yes"),
+                    ("Rouge",          "default_bad = yes"),
+                    ("Neutre",         "default = yes"),
+                    ("Or double",      "double_sided_gold = yes"),
+                    ("Rouge double",   "double_sided_bad = yes"),
+                ]:
+                    tk.Radiobutton(row2, text=label, variable=color_var, value=val).pack(side="left")
 
                 row3 = ttk.Frame(lf)
                 row3.pack(fill="x", pady=1)
@@ -193,21 +248,124 @@ def build_create_tab(notebook, path_var, tag_var):
                 mxv = tk.StringVar(value="100")
                 tk.Entry(row3, textvariable=mxv, width=6).pack(side="left", padx=2)
 
-                pb_rows.append({
+                row4 = ttk.Frame(lf)
+                row4.pack(fill="x", pady=1)
+                inv_var = tk.BooleanVar(value=False)
+                tk.Checkbutton(row4, text="is_inverted", variable=inv_var).pack(side="left")
+                sd_var = tk.BooleanVar(value=False)
+                tk.Checkbutton(row4, text="second_desc", variable=sd_var).pack(side="left", padx=8)
+                tk.Label(row4, text="monthly_progress (valeur) :").pack(side="left", padx=(8, 0))
+                mp_val = tk.StringVar()
+                tk.Entry(row4, textvariable=mp_val, width=6).pack(side="left", padx=2)
+                tk.Label(row4, text="desc :").pack(side="left")
+                mp_desc = tk.StringVar()
+                tk.Entry(row4, textvariable=mp_desc, width=20).pack(side="left", padx=2)
+
+                features_data["progress_bars"]["rows"].append({
                     "name": nv, "desc": dv, "color": color_var,
                     "start": sv, "min": mnv, "max": mxv,
+                    "is_inverted": inv_var, "second_desc": sd_var,
+                    "monthly_value": mp_val, "monthly_desc": mp_desc,
                     "pb_index": i
                 })
 
-        spin = tk.Spinbox(parent, from_=1, to=10, textvariable=num_var,
-                          width=4, command=refresh_pb)
-        spin.pack(anchor="w")
+        tk.Spinbox(parent, from_=1, to=10, textvariable=num_var,
+                   width=4, command=refresh_pb).pack(anchor="w")
         pb_rows_frame.pack(fill="x")
         refresh_pb()
-        features_data["progress_bars"]["rows"] = pb_rows
 
     # ============================================================
-    # FEATURES SIMPLES (accolades vides)
+    # BUILDER GÉNÉRIQUE DE CONDITIONS (réutilisé par is_shown, possible, complete, fail)
+    # ============================================================
+
+    def build_condition_rows(parent, feat_key):
+        rows_frame = ttk.Frame(parent)
+        rows_frame.pack(fill="x")
+
+        def add_row():
+            row_data = {}
+            row_frame = ttk.Frame(rows_frame)
+            row_frame.pack(fill="x", pady=1)
+
+            type_var = tk.StringVar(value=CONDITION_NAMES[0])
+            v1_var   = tk.StringVar()
+            v2_var   = tk.StringVar()
+            not_var  = tk.BooleanVar(value=False)
+            and_var  = tk.BooleanVar(value=False)
+            or_var   = tk.BooleanVar(value=False)
+
+            def toggle_and():
+                if and_var.get(): or_var.set(False)
+
+            def toggle_or():
+                if or_var.get(): and_var.set(False)
+
+            om = tk.OptionMenu(row_frame, type_var, *CONDITION_NAMES)
+            om.config(width=22)
+            om.pack(side="left")
+
+            lbl1 = tk.Label(row_frame, width=8)
+            ent1 = tk.Entry(row_frame, textvariable=v1_var, width=12)
+            lbl2 = tk.Label(row_frame, width=8)
+            ent2 = tk.Entry(row_frame, textvariable=v2_var, width=12)
+
+            def update_fields(*_):
+                _, fields = CONDITION_MAP[type_var.get()]
+                if len(fields) >= 1:
+                    lbl1.config(text=fields[0]); lbl1.pack(side="left")
+                    ent1.pack(side="left", padx=2)
+                else:
+                    lbl1.pack_forget(); ent1.pack_forget()
+                if len(fields) >= 2:
+                    lbl2.config(text=fields[1]); lbl2.pack(side="left")
+                    ent2.pack(side="left", padx=2)
+                else:
+                    lbl2.pack_forget(); ent2.pack_forget()
+
+            type_var.trace_add("write", update_fields)
+            update_fields()
+
+            ttk.Separator(row_frame, orient="vertical").pack(side="left", fill="y", padx=6)
+            tk.Checkbutton(row_frame, text="NOT", variable=not_var, fg="red").pack(side="left")
+            tk.Checkbutton(row_frame, text="AND", variable=and_var, command=toggle_and, fg="blue").pack(side="left")
+            tk.Checkbutton(row_frame, text="OR",  variable=or_var,  command=toggle_or,  fg="green").pack(side="left")
+
+            def remove():
+                row_frame.destroy()
+                if row_data in features_data[feat_key]["rows"]:
+                    features_data[feat_key]["rows"].remove(row_data)
+
+            tk.Button(row_frame, text="×", command=remove, fg="red", width=2).pack(side="right")
+            row_data.update({"type": type_var, "v1": v1_var, "v2": v2_var,
+                             "not": not_var, "and": and_var, "or": or_var})
+            features_data[feat_key]["rows"].append(row_data)
+
+        tk.Button(parent, text="+ Ajouter condition", command=add_row).pack(anchor="w", pady=2)
+
+    def build_is_shown_config(parent, key):
+        dlc_frame = ttk.Frame(parent)
+        dlc_frame.pack(fill="x", pady=(0, 4))
+        tk.Label(dlc_frame, text="DLC requis :").pack(side="left")
+        dlc_var = tk.StringVar(value="")
+        tk.OptionMenu(dlc_frame, dlc_var, *DLC_OPTIONS).pack(side="left", padx=4)
+        features_data["is_shown"]["dlc"] = dlc_var
+
+        ttk.Separator(parent, orient="horizontal").pack(fill="x", pady=2)
+        build_condition_rows(parent, "is_shown")
+
+    def build_possible_config(parent, key):
+        tk.Label(parent, text="game_date >= YEAR.1.1 est toujours inclus.",
+                 foreground="gray").pack(anchor="w")
+        build_condition_rows(parent, "possible")
+
+    def build_complete_config(parent, key):
+        build_condition_rows(parent, "complete")
+
+    def build_fail_config(parent, key):
+        build_condition_rows(parent, "fail")
+
+    # ============================================================
+    # FEATURES SIMPLES
     # ============================================================
 
     def build_empty(parent, key):
@@ -215,25 +373,20 @@ def build_create_tab(notebook, path_var, tag_var):
                  foreground="gray").pack(anchor="w")
 
     # ============================================================
-    # AJOUT DES FEATURES AU PANNEAU
+    # AJOUT DES FEATURES
     # ============================================================
 
-    # Important : initialiser features_data AVANT make_feature pour les features
-    # qui accèdent à features_data["x"] dans leur build_config_fn
-
-    features_data["buttons"] = {"enabled": None}
-    features_data["status_desc"] = {"enabled": None}
-    features_data["progress_bars"] = {"enabled": None}
-    features_data["monthly_empty"] = {"enabled": None}
-    features_data["yearly"] = {"enabled": None}
-    features_data["modifiers"] = {"enabled": None}
-
-    make_feature(scroll_frame, "buttons",       "Boutons",             build_buttons_config)
-    make_feature(scroll_frame, "status_desc",   "Status desc",         build_status_config)
-    make_feature(scroll_frame, "progress_bars", "Progress bars",       build_pb_config)
-    make_feature(scroll_frame, "monthly_empty", "on_monthly_pulse (vide)", build_empty)
-    make_feature(scroll_frame, "yearly",        "on_yearly_pulse (vide)",  build_empty)
+    make_feature(scroll_frame, "is_shown",      "is_shown_when_inactive",        build_is_shown_config)
+    make_feature(scroll_frame, "possible",      "possible (conditions supp.)",   build_possible_config)
+    make_feature(scroll_frame, "complete",      "complete",                      build_complete_config)
+    make_feature(scroll_frame, "fail",          "fail",                          build_fail_config)
+    make_feature(scroll_frame, "buttons",       "Boutons",                       build_buttons_config)
+    make_feature(scroll_frame, "status_desc",   "Status desc",                   build_status_config)
+    make_feature(scroll_frame, "progress_bars", "Progress bars",                 build_pb_config)
+    make_feature(scroll_frame, "monthly_empty", "on_monthly_pulse (vide)",       build_empty)
+    make_feature(scroll_frame, "yearly",        "on_yearly_pulse (vide)",        build_empty)
     make_feature(scroll_frame, "modifiers",     "modifiers_while_active (vide)", build_empty)
+    make_feature(scroll_frame, "on_fail",       "on_fail (vide)",                build_empty)
 
     # ============================================================
     # BOUTON GÉNÉRER
@@ -250,25 +403,72 @@ def build_create_tab(notebook, path_var, tag_var):
             messagebox.showerror("Erreur", "Dossier, TAG, Année et Titre sont obligatoires.")
             return
 
+        # ---- helpers conditions ----
+        def apply_indent(cond, base):
+            return "\n".join(base + line for line in cond.split("\n"))
+
+        def collect_conditions(feat_key, base="        ", inner="            "):
+            standalone, and_group, or_group = [], [], []
+            for r in features_data[feat_key]["rows"]:
+                tmpl, _ = CONDITION_MAP[r["type"].get()]
+                try:
+                    raw = tmpl.format(v1=r["v1"].get().strip(), v2=r["v2"].get().strip())
+                except KeyError:
+                    raw = tmpl.format(v1=r["v1"].get().strip())
+                cond = f"NOT = {{ {raw} }}" if r["not"].get() else raw
+                if r["and"].get():
+                    and_group.append(apply_indent(cond, inner))
+                elif r["or"].get():
+                    or_group.append(apply_indent(cond, inner))
+                else:
+                    standalone.append(apply_indent(cond, base))
+            if and_group:
+                standalone.append(f"{base}AND = {{\n" + "\n".join(and_group) + f"\n{base}}}")
+            if or_group:
+                standalone.append(f"{base}OR = {{\n" + "\n".join(or_group) + f"\n{base}}}")
+            return standalone
+
+        # ---- is_shown_when_inactive ----
+        is_shown_list = None
+        if features_data["is_shown"]["enabled"].get():
+            is_shown_list = collect_conditions("is_shown")
+            dlc_var = features_data["is_shown"].get("dlc")
+            if dlc_var and dlc_var.get():
+                is_shown_list.insert(0, f"        {dlc_var.get()} = yes")
+
+        # ---- possible (conditions supplémentaires) ----
+        possible_cond = None
+        if features_data["possible"]["enabled"].get():
+            possible_cond = collect_conditions("possible")
+
+        # ---- complete ----
+        complete_cond = None
+        if features_data["complete"]["enabled"].get():
+            complete_cond = collect_conditions("complete")
+
+        # ---- fail ----
+        fail_cond = None
+        if features_data["fail"]["enabled"].get():
+            fail_cond = collect_conditions("fail")
+
         # ---- boutons ----
         num_buttons = 0
         buttons_data = []
         if features_data["buttons"]["enabled"].get():
-            num_buttons = features_data["buttons"].get("num", tk.IntVar(value=0)).get()
-            rows = features_data["buttons"].get("rows", [])
-            for r in rows:
+            num_buttons = features_data["buttons"]["num"].get() if features_data["buttons"]["num"] else 0
+            for r in features_data["buttons"]["rows"]:
                 buttons_data.append({
-                    "name": r["name"].get(),
-                    "desc": r["desc"].get(),
-                    "tt1": r["tt1"].get() or "Nothing",
-                    "tt2": r["tt2"].get() or "Nothing",
+                    "name":     r["name"].get(),
+                    "desc":     r["desc"].get(),
+                    "tt1":      r["tt1"].get() or "Nothing",
+                    "tt2":      r["tt2"].get() or "Nothing",
+                    "cooldown": r["cooldown"].get().strip() or None,
                 })
 
         # ---- status_desc ----
         status_desc_list = None
         if features_data["status_desc"]["enabled"].get():
-            rows = features_data["status_desc"].get("rows", [])
-            status_desc_list = [r.get() for r in rows if r.get().strip()]
+            status_desc_list = [r.get() for r in features_data["status_desc"]["rows"] if r.get().strip()]
             if len(status_desc_list) < 2:
                 messagebox.showerror("Erreur", "Status desc nécessite au minimum 2 entrées.")
                 return
@@ -276,20 +476,20 @@ def build_create_tab(notebook, path_var, tag_var):
         # ---- progress bars ----
         progress_bars = None
         if features_data["progress_bars"]["enabled"].get():
-            rows = features_data["progress_bars"].get("rows", [])
             progress_bars = []
-            for r in rows:
-                i = r["pb_index"]
-                # la clé sera construite après avoir le JE index — on passe un placeholder
-                # reconstruit dans main.py avec le vrai index JE
+            for r in features_data["progress_bars"]["rows"]:
                 progress_bars.append({
-                    "pb_index": i,
-                    "name": r["name"].get(),
-                    "desc": r["desc"].get(),
-                    "color": r["color"].get(),
-                    "start": r["start"].get(),
-                    "min": r["min"].get(),
-                    "max": r["max"].get(),
+                    "pb_index":      r["pb_index"],
+                    "name":          r["name"].get(),
+                    "desc":          r["desc"].get(),
+                    "color":         r["color"].get(),
+                    "start":         r["start"].get(),
+                    "min":           r["min"].get(),
+                    "max":           r["max"].get(),
+                    "is_inverted":   r["is_inverted"].get(),
+                    "second_desc":   r["second_desc"].get(),
+                    "monthly_value": r["monthly_value"].get().strip() or None,
+                    "monthly_desc":  r["monthly_desc"].get().strip() or None,
                 })
 
         try:
@@ -306,6 +506,11 @@ def build_create_tab(notebook, path_var, tag_var):
                 monthly_empty=features_data["monthly_empty"]["enabled"].get(),
                 yearly=features_data["yearly"]["enabled"].get(),
                 modifiers=features_data["modifiers"]["enabled"].get(),
+                is_shown=is_shown_list,
+                possible_conditions=possible_cond,
+                complete_conditions=complete_cond,
+                fail_conditions=fail_cond,
+                on_fail=features_data["on_fail"]["enabled"].get(),
             )
             messagebox.showinfo("Succès", "Journal Entry générée avec succès !")
         except Exception as e:
