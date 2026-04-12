@@ -209,8 +209,6 @@ def build_create_tab(notebook, path_var, tag_var):
         "progress_bars": {"enabled": tk.BooleanVar(value=False), "rows": []},
         "monthly_empty": {"enabled": tk.BooleanVar(value=False)},
         "yearly":        {"enabled": tk.BooleanVar(value=False)},
-        "modifiers":     {"enabled": tk.BooleanVar(value=False)},
-        "on_fail":       {"enabled": tk.BooleanVar(value=False)},
     }
 
     def make_feature(parent, feat_key, feat_label, build_config_fn):
@@ -498,8 +496,6 @@ def build_create_tab(notebook, path_var, tag_var):
     make_feature(scroll_frame, "progress_bars", "Progress bars",                 build_pb_config)
     make_feature(scroll_frame, "monthly_empty", "on_monthly_pulse (vide)",       build_empty)
     make_feature(scroll_frame, "yearly",        "on_yearly_pulse (vide)",        build_empty)
-    make_feature(scroll_frame, "modifiers",     "modifiers_while_active (vide)", build_empty)
-    make_feature(scroll_frame, "on_fail",       "on_fail (vide)",                build_empty)
 
     # ============================================================
     # BOUTON GÉNÉRER
@@ -539,7 +535,7 @@ def build_create_tab(notebook, path_var, tag_var):
                 )
                 messagebox.showinfo("Succès", "Journal Entry (Goal + Progress Bar) générée avec succès !")
             except Exception as e:
-                messagebox.showerror("Erreur", str(e))
+                messagebox.showerror("Erreur", f"{type(e).__name__}: {e!s}")
             return
 
         # ---- helpers conditions ----
@@ -645,16 +641,14 @@ def build_create_tab(notebook, path_var, tag_var):
                 status_desc=status_desc_list,
                 monthly_empty=features_data["monthly_empty"]["enabled"].get(),
                 yearly=features_data["yearly"]["enabled"].get(),
-                modifiers=features_data["modifiers"]["enabled"].get(),
                 is_shown=is_shown_list,
                 possible_conditions=possible_cond,
                 complete_conditions=complete_cond,
                 fail_conditions=fail_cond,
-                on_fail=features_data["on_fail"]["enabled"].get(),
             )
             messagebox.showinfo("Succès", "Journal Entry générée avec succès !")
         except Exception as e:
-            messagebox.showerror("Erreur", str(e))
+            messagebox.showerror("Erreur", f"{type(e).__name__}: {e!s}")
 
     tk.Button(frame, text="Générer la JE", command=on_generate,
               bg="#4CAF50", fg="white", font=("Arial", 11, "bold"),

@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox
 import os
 import re
 
-from vic3_tool.generators.je_generator import generate_je_block
+from vic3_tool.generators.je_generator import generate_je_block, generate_je_goal_progress_block
 from vic3_tool.generators.button_generator import generate_buttons
 from vic3_tool.generators.localization_generator import generate_localization
 from vic3_tool.generators.progress_bar_generator import generate_progress_bar
@@ -163,7 +163,14 @@ def parse_je_data(je_path, loc_path, btn_path, pb_path, key):
         "complete_rows": [], "fail_rows": [],
         "buttons": [], "progress_bars": [], "status_desc": [],
         "monthly_empty": False, "yearly": False,
-        "modifiers": False, "on_fail": False,
+        "goal_mode": False,
+        "goal_global_var": "",
+        "goal_value": "",
+        "goal_pulse": "monthly",
+        "goal_pb_name": "",
+        "goal_pb_desc": "",
+        "goal_pb_color": "default_green = yes",
+        "goal_pb_max": "10",
     }
     je_content  = read_file(je_path)
     loc_content = read_file(loc_path)
@@ -213,11 +220,20 @@ def parse_je_data(je_path, loc_path, btn_path, pb_path, key):
     if fail_txt is not None:
         data["fail_rows"] = parse_condition_rows(fail_txt)
 
+    # Goal Value + Progress Bar mode
+    m = re.search(r'current_value\s*=\s*\{\s*value\s*=\s*global_var:(\S+)', block)
+    if m:
+        data["goal_mode"] = True
+        data["goal_global_var"] = m.group(1)
+    m = re.search(r'goal_add_value\s*=\s*\{\s*value\s*=\s*(\S+)', block)
+    if m:
+        data["goal_value"] = m.group(1)
+    if re.search(r'on_yearly_pulse\s*=\s*\{', block):
+        data["goal_pulse"] = "yearly"
+
     # Flags
     data["monthly_empty"] = bool(re.search(r'on_monthly_pulse', block))
     data["yearly"]        = bool(re.search(r'on_yearly_pulse', block))
-    data["modifiers"]     = bool(re.search(r'modifiers_while_active', block))
-    data["on_fail"]       = bool(re.search(r'on_fail\s*=\s*\{', block))
 
     # Buttons
     btn_keys = re.findall(rf'scripted_button\s*=\s*({re.escape(key)}_button_\d+)', block)
@@ -390,6 +406,13 @@ def parse_je_data(je_path, loc_path, btn_path, pb_path, key):
                     pb["monthly_desc"] = mm.group(1)
         data["progress_bars"].append(pb)
 
+    if data["goal_mode"] and data["progress_bars"]:
+        first_pb = data["progress_bars"][0]
+        data["goal_pb_name"] = first_pb["name"]
+        data["goal_pb_desc"] = first_pb["desc"]
+        data["goal_pb_color"] = first_pb["color"]
+        data["goal_pb_max"] = first_pb["max"]
+
     # Status desc
     n, texts = 1, []
     while True:
@@ -444,8 +467,12 @@ def build_manage_tab(parent, path_var, tag_var):
     je_listbox.pack(side="left", fill="both", expand=True)
     sb_list.pack(side="right", fill="y")
 
-    tk.Button(left, text="Charger JE sélectionnée",
-              command=lambda: load_selected_je()).pack(pady=6)
+    action_row = ttk.Frame(left)
+    action_row.pack(pady=6)
+    tk.Button(action_row, text="Charger JE sélectionnée",
+              command=lambda: load_selected_je()).pack(side="left")
+    tk.Button(action_row, text="X", width=3,
+              command=lambda: delete_selected_je(), fg="red").pack(side="left", padx=(6, 0))
 
     current_key_var = tk.StringVar(value="")
     ttk.Label(left, textvariable=current_key_var,
@@ -484,6 +511,72 @@ def build_manage_tab(parent, path_var, tag_var):
     desc_text = tk.Text(base, height=3, width=40)
     desc_text.grid(row=2, column=1, sticky="w", padx=6, pady=2)
 
+    mode_notebook = ttk.Notebook(form)
+    mode_notebook.pack(fill="both", expand=True, padx=8, pady=(0, 6))
+
+    tab_standard = ttk.Frame(mode_notebook)
+    tab_goal = ttk.Frame(mode_notebook)
+    mode_notebook.add(tab_standard, text="Standard")
+    mode_notebook.add(tab_goal, text="Goal Value + Progress Bar")
+
+    standard_container = ttk.Frame(tab_standard)
+    standard_container.pack(fill="both", expand=True)
+
+    gp_frame = ttk.Frame(tab_goal)
+    gp_frame.pack(fill="x", padx=12, pady=8)
+
+    ttk.Label(
+        gp_frame,
+        text="SchÃ©ma : progress bar pilotÃ©e par une variable globale,\n"
+             "la JE se complÃ¨te quand current_value atteint goal_add_value.",
+        foreground="gray",
+        justify="left",
+    ).pack(anchor="w", pady=(0, 8))
+
+    row_gv = ttk.Frame(gp_frame); row_gv.pack(fill="x", pady=3)
+    ttk.Label(row_gv, text="Variable globale :", width=20, anchor="w").pack(side="left")
+    gp_global_var = tk.StringVar(value="variable_global_ici")
+    ttk.Entry(row_gv, textvariable=gp_global_var, width=36).pack(side="left", padx=4)
+
+    row_goal = ttk.Frame(gp_frame); row_goal.pack(fill="x", pady=3)
+    ttk.Label(row_goal, text="goal_add_value :", width=20, anchor="w").pack(side="left")
+    gp_goal_value = tk.StringVar(value="6")
+    ttk.Entry(row_goal, textvariable=gp_goal_value, width=8).pack(side="left", padx=4)
+
+    row_pulse = ttk.Frame(gp_frame); row_pulse.pack(fill="x", pady=3)
+    ttk.Label(row_pulse, text="IncrÃ©ment dans :", width=20, anchor="w").pack(side="left")
+    gp_pulse = tk.StringVar(value="monthly")
+    tk.Radiobutton(row_pulse, text="on_monthly_pulse", variable=gp_pulse, value="monthly").pack(side="left")
+    tk.Radiobutton(row_pulse, text="on_yearly_pulse", variable=gp_pulse, value="yearly").pack(side="left", padx=8)
+
+    ttk.Separator(gp_frame, orient="horizontal").pack(fill="x", pady=8)
+    ttk.Label(gp_frame, text="Progress Bar", font=("", 10, "bold")).pack(anchor="w")
+
+    row_pb1 = ttk.Frame(gp_frame); row_pb1.pack(fill="x", pady=3)
+    ttk.Label(row_pb1, text="Nom affichÃ© :", width=20, anchor="w").pack(side="left")
+    gp_pb_name = tk.StringVar()
+    ttk.Entry(row_pb1, textvariable=gp_pb_name, width=28).pack(side="left", padx=4)
+    ttk.Label(row_pb1, text="Desc :").pack(side="left")
+    gp_pb_desc = tk.StringVar()
+    ttk.Entry(row_pb1, textvariable=gp_pb_desc, width=28).pack(side="left", padx=4)
+
+    row_pb2 = ttk.Frame(gp_frame); row_pb2.pack(fill="x", pady=3)
+    ttk.Label(row_pb2, text="Max value :", width=20, anchor="w").pack(side="left")
+    gp_pb_max = tk.StringVar(value="10")
+    ttk.Entry(row_pb2, textvariable=gp_pb_max, width=8).pack(side="left", padx=4)
+
+    row_pb3 = ttk.Frame(gp_frame); row_pb3.pack(fill="x", pady=3)
+    ttk.Label(row_pb3, text="Couleur :", width=20, anchor="w").pack(side="left")
+    gp_pb_color = tk.StringVar(value="default_green = yes")
+    for lbl, val in [
+        ("Vert", "default_green = yes"),
+        ("Rouge", "default_bad = yes"),
+        ("Neutre", "default = yes"),
+        ("Or double", "double_sided_gold = yes"),
+        ("Rouge double", "double_sided_bad = yes"),
+    ]:
+        tk.Radiobutton(row_pb3, text=lbl, variable=gp_pb_color, value=val).pack(side="left")
+
     # ── features_data ──────────────────────────────────────
     features_data = {
         "is_shown":      {"enabled": tk.BooleanVar(value=False), "rows": [], "dlc": None, "_add_row": None, "_rows_frame": None},
@@ -495,11 +588,9 @@ def build_manage_tab(parent, path_var, tag_var):
         "progress_bars": {"enabled": tk.BooleanVar(value=False), "rows": [], "_rows_frame": None},
         "monthly_empty": {"enabled": tk.BooleanVar(value=False)},
         "yearly":        {"enabled": tk.BooleanVar(value=False)},
-        "modifiers":     {"enabled": tk.BooleanVar(value=False)},
-        "on_fail":       {"enabled": tk.BooleanVar(value=False)},
     }
 
-    scroll_frame = form  # alias
+    scroll_frame = standard_container  # alias
 
     # ── make_feature (avec trace pour activation programmatique) ──
     def make_feature(parent, feat_key, feat_label, build_config_fn):
@@ -808,8 +899,6 @@ def build_manage_tab(parent, path_var, tag_var):
     make_feature(scroll_frame, "progress_bars", "Progress bars",                 build_pb_config)
     make_feature(scroll_frame, "monthly_empty", "on_monthly_pulse (vide)",       build_empty)
     make_feature(scroll_frame, "yearly",        "on_yearly_pulse (vide)",        build_empty)
-    make_feature(scroll_frame, "modifiers",     "modifiers_while_active (vide)", build_empty)
-    make_feature(scroll_frame, "on_fail",       "on_fail (vide)",                build_empty)
 
     # ── Bouton sauvegarder ──────────────────────────────────
     tk.Button(right, text="Sauvegarder la JE", command=lambda: on_save(),
@@ -840,6 +929,76 @@ def build_manage_tab(parent, path_var, tag_var):
                 w.destroy()
         features_data[feat_key]["rows"].clear()
 
+    def clear_loaded_je():
+        current_key_var.set("")
+        year_var.set("")
+        title_var.set("")
+        desc_text.delete("1.0", "end")
+        gp_global_var.set("variable_global_ici")
+        gp_goal_value.set("6")
+        gp_pulse.set("monthly")
+        gp_pb_name.set("")
+        gp_pb_desc.set("")
+        gp_pb_max.set("10")
+        gp_pb_color.set("default_green = yes")
+        mode_notebook.select(tab_standard)
+
+        for fk in features_data:
+            features_data[fk]["enabled"].set(False)
+            if "rows" in features_data[fk]:
+                clear_condition_rows(fk) if "_rows_frame" in features_data[fk] else None
+
+    def delete_selected_je():
+        sel = je_listbox.curselection()
+        if not sel:
+            messagebox.showwarning("Avertissement", "Sélectionnez une JE à supprimer.")
+            return
+
+        key = je_listbox.get(sel[0])
+        tag = tag_var.get().upper()
+        base_path = path_var.get()
+
+        if not messagebox.askyesno("Confirmation", f"Supprimer {key} et toutes ses données liées ?"):
+            return
+
+        je_path  = os.path.join(base_path, "common/journal_entries", f"{tag}.txt")
+        loc_path = os.path.join(base_path, "localization/english", "01_hmmf_je_localization_l_english.yml")
+        btn_path = os.path.join(base_path, "common/scripted_buttons", f"{tag}.txt")
+        pb_path  = os.path.join(base_path, "common/scripted_progress_bars", "hmmf_progressbar.txt")
+
+        try:
+            je_content = read_file(je_path)
+            br = find_block_range(je_content, key)
+            if br:
+                je_content = (je_content[:br[0]] + je_content[br[1]:]).strip()
+                if je_content or os.path.exists(je_path):
+                    with open(je_path, "w", encoding="utf-8") as f:
+                        f.write(je_content + ("\n" if je_content else ""))
+
+            loc_content = read_file(loc_path) if os.path.exists(loc_path) else ""
+            if loc_content:
+                loc_content = remove_loc_entries(loc_content, key)
+                with open(loc_path, "w", encoding="utf-8") as f:
+                    f.write(loc_content.rstrip() + "\n")
+
+            btn_content = read_file(btn_path) if os.path.exists(btn_path) else ""
+            btn_content = remove_blocks_for_key(btn_content, f"{key}_button_")
+            if btn_content.strip() or os.path.exists(btn_path):
+                with open(btn_path, "w", encoding="utf-8") as f:
+                    f.write(btn_content + ("\n" if btn_content else ""))
+
+            pb_content = read_file(pb_path) if os.path.exists(pb_path) else ""
+            pb_content = remove_blocks_for_key(pb_content, f"{key}_")
+            if pb_content.strip() or os.path.exists(pb_path):
+                with open(pb_path, "w", encoding="utf-8") as f:
+                    f.write(pb_content + ("\n" if pb_content else ""))
+
+            je_listbox.delete(sel[0])
+            clear_loaded_je()
+            messagebox.showinfo("Succès", f"{key} a été supprimée.")
+        except Exception as e:
+            messagebox.showerror("Erreur", f"{type(e).__name__}: {e!s}")
+
     def load_selected_je():
         sel = je_listbox.curselection()
         if not sel:
@@ -867,6 +1026,14 @@ def build_manage_tab(parent, path_var, tag_var):
         title_var.set(d["title"])
         desc_text.delete("1.0", "end")
         desc_text.insert("1.0", d["desc"])
+        gp_global_var.set(d["goal_global_var"] or "variable_global_ici")
+        gp_goal_value.set(d["goal_value"] or "6")
+        gp_pulse.set(d["goal_pulse"] or "monthly")
+        gp_pb_name.set(d["goal_pb_name"])
+        gp_pb_desc.set(d["goal_pb_desc"])
+        gp_pb_max.set(d["goal_pb_max"] or "10")
+        gp_pb_color.set(d["goal_pb_color"] or "default_green = yes")
+        mode_notebook.select(tab_goal if d["goal_mode"] else tab_standard)
 
         # ── is_shown ──
         if d["is_shown_rows"] or d["is_shown_dlc"]:
@@ -898,7 +1065,7 @@ def build_manage_tab(parent, path_var, tag_var):
                                r["not"], r["and"], r["or"])
 
         # ── fail ──
-        if d["fail_rows"] is not None:
+        if d["fail_rows"]:
             features_data["fail"]["enabled"].set(True)
             add_row_fn = features_data["fail"]["_add_row"]
             if add_row_fn:
@@ -1011,8 +1178,6 @@ def build_manage_tab(parent, path_var, tag_var):
         # ── Flags ──
         features_data["monthly_empty"]["enabled"].set(d["monthly_empty"])
         features_data["yearly"]["enabled"].set(d["yearly"])
-        features_data["modifiers"]["enabled"].set(d["modifiers"])
-        features_data["on_fail"]["enabled"].set(d["on_fail"])
 
     # ================================================================
     # SAUVEGARDE
@@ -1033,6 +1198,75 @@ def build_manage_tab(parent, path_var, tag_var):
         year  = year_var.get().strip()
         title = title_var.get().strip()
         desc  = desc_text.get("1.0", "end").strip()
+
+        if mode_notebook.index(mode_notebook.select()) == 1:
+            global_var = gp_global_var.get().strip()
+            goal_value = gp_goal_value.get().strip()
+            pb_name = gp_pb_name.get().strip()
+            pb_desc = gp_pb_desc.get().strip()
+            pb_max = gp_pb_max.get().strip()
+            pb_color = gp_pb_color.get()
+            pulse = gp_pulse.get()
+
+            if not global_var or not goal_value or not pb_max:
+                messagebox.showerror("Erreur", "Variable globale, Goal value et Max value sont obligatoires.")
+                return
+
+            m = re.match(r'(.+)_je_(\d+)', key)
+            je_tag   = m.group(1) if m else tag
+            je_index = int(m.group(2)) if m else 1
+            je       = JournalEntry(je_tag, je_index, year, title, desc)
+            pb_key   = f"{key}_1_progress_bar"
+
+            pb_data = {
+                "key":           pb_key,
+                "name":          pb_name,
+                "desc":          pb_desc,
+                "color":         pb_color,
+                "start":         "0",
+                "min":           "0",
+                "max":           pb_max,
+                "is_inverted":   False,
+                "second_desc":   False,
+                "monthly_value": None,
+                "monthly_desc":  None,
+            }
+
+            new_je_block = generate_je_goal_progress_block(je, global_var, pb_key, goal_value, pulse)
+
+            try:
+                je_content = read_file(je_path)
+                br = find_block_range(je_content, key)
+                if br:
+                    je_content = je_content[:br[0]] + new_je_block + je_content[br[1]:]
+                else:
+                    je_content += "\n" + new_je_block
+                with open(je_path, "w", encoding="utf-8") as f:
+                    f.write(je_content)
+
+                loc_content = read_file(loc_path) if os.path.exists(loc_path) else "l_english:\n"
+                loc_content = remove_loc_entries(loc_content, key)
+                loc_content = loc_content.rstrip() + "\n\n"
+                loc_content += generate_localization(je, [], [pb_data], None)
+                with open(loc_path, "w", encoding="utf-8") as f:
+                    f.write(loc_content)
+
+                btn_content = read_file(btn_path) if os.path.exists(btn_path) else ""
+                btn_content = remove_blocks_for_key(btn_content, f"{key}_button_")
+                if btn_content.strip() or os.path.exists(btn_path):
+                    with open(btn_path, "w", encoding="utf-8") as f:
+                        f.write(btn_content)
+
+                pb_content = read_file(pb_path) if os.path.exists(pb_path) else ""
+                pb_content = remove_blocks_for_key(pb_content, f"{key}_")
+                pb_content = pb_content.rstrip() + "\n" + generate_progress_bar(pb_data)
+                with open(pb_path, "w", encoding="utf-8") as f:
+                    f.write(pb_content)
+
+                messagebox.showinfo("SuccÃ¨s", f"{key} sauvegardÃ©e avec succÃ¨s !")
+            except Exception as e:
+                messagebox.showerror("Erreur", f"{type(e).__name__}: {e!s}")
+            return
 
         # ── Collecter conditions (helper inline) ──────────────
         def apply_indent(cond, base):
@@ -1131,8 +1365,6 @@ def build_manage_tab(parent, path_var, tag_var):
             "status_desc":         status_desc_list,
             "monthly_empty":       features_data["monthly_empty"]["enabled"].get(),
             "yearly":              features_data["yearly"]["enabled"].get(),
-            "modifiers":           features_data["modifiers"]["enabled"].get(),
-            "on_fail":             features_data["on_fail"]["enabled"].get(),
             "is_shown":            is_shown_list,
             "possible_conditions": possible_cond,
             "complete_conditions": complete_cond,
@@ -1173,18 +1405,19 @@ def build_manage_tab(parent, path_var, tag_var):
                     f.write(generate_buttons(je, buttons_data))
 
             # ── PB file : supprimer + réécrire ──────────────
+            pb_content = read_file(pb_path) if os.path.exists(pb_path) else ""
+            pb_content = remove_blocks_for_key(pb_content, f"{key}_")
             if progress_bars:
-                pb_content = read_file(pb_path) if os.path.exists(pb_path) else ""
-                pb_content = remove_blocks_for_key(pb_content, f"{key}_")
                 pb_content = pb_content.rstrip() + "\n"
                 for pb in progress_bars:
                     pb_content += generate_progress_bar(pb)
+            if pb_content.strip() or os.path.exists(pb_path):
                 with open(pb_path, "w", encoding="utf-8") as f:
                     f.write(pb_content)
 
             messagebox.showinfo("Succès", f"{key} sauvegardée avec succès !")
 
         except Exception as e:
-            messagebox.showerror("Erreur", str(e))
+            messagebox.showerror("Erreur", f"{type(e).__name__}: {e!s}")
 
     return outer

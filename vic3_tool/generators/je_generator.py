@@ -6,8 +6,11 @@ def generate_je_goal_progress_block(je, global_var, pb_key, goal_value, pulse="m
     return f"""{je.key} = {{
     icon = "gfx/interface/icons/event_icons/{je.key}.dds"
 
-    group = je_group_ef
+    group = je_group_historical_content
     should_be_pinned_by_default = yes
+
+    modifiers_while_active = {{
+    }}
 
     is_shown_when_inactive = {{
         exists = c:{je.tag}
@@ -29,6 +32,9 @@ def generate_je_goal_progress_block(je, global_var, pb_key, goal_value, pulse="m
     }}
 
     on_complete = {{
+    }}
+
+    on_fail = {{
     }}
 
     scripted_progress_bar = {pb_key}
@@ -166,13 +172,6 @@ def generate_je_block(je, options):
     }
 """
 
-    modifiers_block = ""
-    if options.get("modifiers"):
-        modifiers_block = """
-    modifiers_while_active = {
-    }
-"""
-
     # -------- BUTTONS --------
 
     buttons = ""
@@ -192,22 +191,12 @@ def generate_je_block(je, options):
 
     # -------- FAIL --------
 
-    fail_block = ""
+    fail_cond_str = ""
     fail_lines = options.get("fail_conditions")
     if fail_lines is not None:
-        inner = ("\n".join(fail_lines) + "\n") if fail_lines else ""
-        fail_block = f"""    fail = {{
-{inner}    }}
-"""
+        fail_cond_str = ("\n".join(fail_lines) + "\n") if fail_lines else ""
 
-    # -------- ON_COMPLETE / ON_FAIL --------
-
-    on_fail_block = ""
-    if options.get("on_fail"):
-        on_fail_block = """
-    on_fail = {
-    }
-"""
+    # -------- ON_COMPLETE --------
 
     return template.format(
         KEY=je.key,
@@ -219,11 +208,9 @@ def generate_je_block(je, options):
         STATUS_DESC=status_block,
         PROGRESS_BAR_LINK=progress_link,
         IMMEDIATE="",
-        FAIL=fail_block,
+        FAIL_COND=fail_cond_str,
         ON_COMPLETE="",
-        ON_FAIL=on_fail_block,
         ON_MONTHLY=monthly_progress if monthly_progress else monthly_empty,
         ON_YEARLY=yearly_block,
-        MODIFIERS=modifiers_block,
         BUTTONS=buttons
     )

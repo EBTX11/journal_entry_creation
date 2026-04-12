@@ -1,8 +1,11 @@
 {KEY} = {{
     icon = "gfx/interface/icons/event_icons/{KEY}.dds"
 
-    group = je_group_ef
+    group = je_group_historical_content
     should_be_pinned_by_default = yes
+
+    modifiers_while_active = {{
+    }}
 
 {IS_SHOWN}
     possible = {{
@@ -16,16 +19,19 @@
     complete = {{
 {COMPLETE_COND}    }}
 
-{FAIL}
+    fail = {{
+{FAIL_COND}    }}
+
     on_complete = {{
         {ON_COMPLETE}
     }}
 
-{ON_FAIL}
+    on_fail = {{
+    }}
+
 {STATUS_DESC}
 {PROGRESS_BAR_LINK}
 {BUTTONS}
 {ON_MONTHLY}
 {ON_YEARLY}
-{MODIFIERS}
 }}
