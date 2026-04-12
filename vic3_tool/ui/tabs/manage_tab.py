@@ -136,8 +136,7 @@ def parse_condition_rows(block_text):
                 if depth > 0:
                     inner.append(lines[idx])
                 idx += 1
-            for il in [l for l in inner if l.strip() and l.strip() != '}']:
-                r = match_to_condition(il)
+            for r in parse_condition_rows('\n'.join(inner)):
                 r["or"] = True
                 rows.append(r)
             continue
