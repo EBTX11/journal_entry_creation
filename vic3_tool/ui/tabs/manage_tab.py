@@ -9,6 +9,7 @@ from vic3_tool.generators.localization_generator import generate_localization
 from vic3_tool.generators.progress_bar_generator import generate_progress_bar
 from vic3_tool.models.journal_entry import JournalEntry
 from vic3_tool.utils.file_manager import read_file
+from vic3_tool.utils.formatter import format_text
 from vic3_tool.ui.tabs.create_tab import (
     CONDITION_SPECS, CONDITION_NAMES, CONDITION_MAP, DLC_OPTIONS, make_tt_list
 )
@@ -441,6 +442,18 @@ def remove_blocks_for_key(content, key_prefix):
     for start, end in sorted(set(ranges), reverse=True):
         content = content[:start] + content[end:]
     return content.strip()
+
+
+def patch_named_block_in(content, block_name, new_text):
+    """Remplace block_name = { ... } dans content.
+    Si absent, insère new_text avant la dernière accolade fermante."""
+    br = find_block_range(content, block_name)
+    if br:
+        return content[:br[0]] + new_text + content[br[1]:]
+    last = content.rfind('}')
+    if last >= 0:
+        return content[:last] + '\n' + new_text + '\n' + content[last:]
+    return content + '\n' + new_text
 
 
 # ================================================================
@@ -1353,38 +1366,215 @@ def build_manage_tab(parent, path_var, tag_var):
                     "monthly_desc":  r["monthly_desc"].get().strip() or None,
                 })
 
-        # ── Construire le JE ──
+        # ── Construire l'objet JE ──
         m = re.match(r'(.+)_je_(\d+)', key)
         je_tag   = m.group(1) if m else tag
         je_index = int(m.group(2)) if m else 1
         je       = JournalEntry(je_tag, je_index, year, title, desc)
 
-        options = {
-            "buttons":             num_buttons,
-            "progress_bars":       progress_bars,
-            "status_desc":         status_desc_list,
-            "monthly_empty":       features_data["monthly_empty"]["enabled"].get(),
-            "yearly":              features_data["yearly"]["enabled"].get(),
-            "is_shown":            is_shown_list,
-            "possible_conditions": possible_cond,
-            "complete_conditions": complete_cond,
-            "fail_conditions":     fail_cond,
-        }
-
-        new_je_block = generate_je_block(je, options)
-
         try:
-            # ── JE file : remplacer le bloc ──────────────────
             je_content = read_file(je_path)
             br = find_block_range(je_content, key)
+
             if br:
-                je_content = je_content[:br[0]] + new_je_block + je_content[br[1]:]
-            else:
-                je_content += "\n" + new_je_block
+                # ══ MODE CHIRURGICAL : JE déjà présente ══════════════════
+                # Seules les sections cochées sont modifiées.
+                # Les sections non cochées restent intactes dans le fichier.
+                je_block = je_content[br[0]:br[1]]
+                safe_key = re.escape(key)
+
+                # Année : toujours mise à jour dans le bloc possible
+                je_block = re.sub(r'(game_date\s*>=\s*)\d+', rf'\g<1>{year}', je_block)
+
+                # is_shown_when_inactive
+                if features_data["is_shown"]["enabled"].get():
+                    cond_lines = "\n".join(is_shown_list) + "\n" if is_shown_list else ""
+                    snippet = f"    is_shown_when_inactive = {{\n{cond_lines}    }}"
+                    je_block = patch_named_block_in(je_block, "is_shown_when_inactive", snippet)
+
+                # possible (conditions supplémentaires)
+                if features_data["possible"]["enabled"].get():
+                    cond_lines = "\n".join(possible_cond) + "\n" if possible_cond else ""
+                    snippet = f"    possible = {{\n        game_date >= {year}.1.1\n{cond_lines}    }}"
+                    je_block = patch_named_block_in(je_block, "possible", snippet)
+
+                # complete
+                if features_data["complete"]["enabled"].get():
+                    cond_lines = "\n".join(complete_cond) + "\n" if complete_cond else ""
+                    snippet = f"    complete = {{\n{cond_lines}    }}"
+                    je_block = patch_named_block_in(je_block, "complete", snippet)
+
+                # fail
+                if features_data["fail"]["enabled"].get():
+                    cond_lines = "\n".join(fail_cond) + "\n" if fail_cond else ""
+                    snippet = f"    fail = {{\n{cond_lines}    }}"
+                    je_block = patch_named_block_in(je_block, "fail", snippet)
+
+                # Boutons (lignes scripted_button, pas un bloc nommé)
+                if features_data["buttons"]["enabled"].get():
+                    je_block = re.sub(
+                        rf'[ \t]*scripted_button\s*=\s*{safe_key}_button_\d+[ \t]*\n?', '',
+                        je_block
+                    )
+                    if num_buttons:
+                        btn_lines = "".join(
+                            f"    scripted_button = {key}_button_{i}\n"
+                            for i in range(1, num_buttons + 1)
+                        )
+                        last_brace = je_block.rfind('}')
+                        je_block = je_block[:last_brace] + btn_lines + je_block[last_brace:]
+
+                # status_desc
+                if features_data["status_desc"]["enabled"].get() and status_desc_list:
+                    entries = ""
+                    for i, text in enumerate(status_desc_list, start=1):
+                        sk = f"{key}_status_desc_{i}"
+                        entries += (
+                            f"\n            triggered_desc = {{\n"
+                            f"                desc = {sk}\n"
+                            f"                trigger = {{\n"
+                            f"                }}\n"
+                            f"            }}\n"
+                        )
+                    snippet = f"    status_desc = {{\n        first_valid = {{{entries}        }}\n    }}"
+                    je_block = patch_named_block_in(je_block, "status_desc", snippet)
+
+                # Progress bars (lignes scripted_progress_bar + on_monthly_pulse)
+                if features_data["progress_bars"]["enabled"].get():
+                    je_block = re.sub(
+                        rf'[ \t]*scripted_progress_bar\s*=\s*{safe_key}_\d+_progress_bar[ \t]*\n?', '',
+                        je_block
+                    )
+                    if progress_bars:
+                        pb_lines = "".join(
+                            f"    scripted_progress_bar = {pb['key']}\n"
+                            for pb in progress_bars
+                        )
+                        last_brace = je_block.rfind('}')
+                        je_block = je_block[:last_brace] + pb_lines + je_block[last_brace:]
+                        # Mise à jour on_monthly_pulse pour réinitialiser les PB
+                        monthly_inner = "".join(
+                            f"\n            je:{key} ?= {{\n"
+                            f"                set_bar_progress = {{\n"
+                            f"                    value = 0\n"
+                            f"                    name = {pb['key']}\n"
+                            f"                }}\n"
+                            f"            }}\n"
+                            for pb in progress_bars
+                        )
+                        monthly_snip = (
+                            f"    on_monthly_pulse = {{\n"
+                            f"        effect = {{{monthly_inner}"
+                            f"        }}\n"
+                            f"    }}"
+                        )
+                        je_block = patch_named_block_in(je_block, "on_monthly_pulse", monthly_snip)
+
+                # on_monthly_pulse vide (seulement si pas de PB activées)
+                if features_data["monthly_empty"]["enabled"].get() \
+                        and not features_data["progress_bars"]["enabled"].get():
+                    snippet = "    on_monthly_pulse = {\n        effect = {\n        }\n    }"
+                    je_block = patch_named_block_in(je_block, "on_monthly_pulse", snippet)
+
+                # on_yearly_pulse vide
+                if features_data["yearly"]["enabled"].get():
+                    snippet = "    on_yearly_pulse = {\n        effect = {\n        }\n    }"
+                    je_block = patch_named_block_in(je_block, "on_yearly_pulse", snippet)
+
+                # ── Écriture JE ──
+                je_content = je_content[:br[0]] + je_block + je_content[br[1]:]
+                with open(je_path, "w", encoding="utf-8") as f:
+                    f.write(je_content)
+
+                # ── Loc : chirurgical (seules les sections activées sont mises à jour) ──
+                loc_content = read_file(loc_path) if os.path.exists(loc_path) else "l_english:\n"
+                safe = re.escape(key)
+
+                # Infos de base : titre + desc toujours mis à jour
+                loc_content = re.sub(rf'[ \t]*{safe}:0[^\n]*\n', '', loc_content)
+                loc_content = re.sub(rf'[ \t]*{safe}_reason:0[^\n]*\n', '', loc_content)
+                loc_content = loc_content.rstrip() + '\n\n'
+                loc_content += f'  {key}:0 "{title}"\n'
+                loc_content += f'  {key}_reason:0 "{format_text(desc)}"\n'
+
+                # Status desc
+                if features_data["status_desc"]["enabled"].get() and status_desc_list:
+                    loc_content = re.sub(rf'[ \t]*{safe}_status_desc_[^\n]*\n', '', loc_content)
+                    for i, txt in enumerate(status_desc_list, start=1):
+                        loc_content += f'  {key}_status_desc_{i}:0 "{txt}"\n'
+
+                # Boutons
+                if features_data["buttons"]["enabled"].get():
+                    loc_content = re.sub(rf'[ \t]*{safe}_button_[^\n]*\n', '', loc_content)
+                    for i, bd in enumerate(buttons_data, start=1):
+                        btn_k = f"{key}_button_{i}"
+                        loc_content += f'  {btn_k}:0 "{bd.get("name", "")}"\n'
+                        loc_content += f'  {btn_k}_desc:0 "{bd.get("desc", "")}"\n'
+                        for j, tt in enumerate(bd.get("possible_tts") or ["Nothing"], start=1):
+                            loc_content += f'  {btn_k}_tt_possible_{j}:0 "{tt or "Nothing"}"\n'
+                        for j, tt in enumerate(bd.get("effect_tts") or ["Nothing"], start=1):
+                            loc_content += f'  {btn_k}_tt_effect_{j}:0 "{tt or "Nothing"}"\n'
+
+                # Progress bars
+                if features_data["progress_bars"]["enabled"].get() and progress_bars:
+                    loc_content = re.sub(rf'[ \t]*{safe}_\d+_progress_bar[^\n]*\n', '', loc_content)
+                    for pb in progress_bars:
+                        loc_content += f'  {pb["key"]}:0 "{pb["name"]}"\n'
+                        loc_content += f'  {pb["key"]}_desc:0 "{pb["desc"]}"\n'
+
+                with open(loc_path, "w", encoding="utf-8") as f:
+                    f.write(loc_content)
+
+                # ── Btn file : seulement si boutons activés ──
+                if features_data["buttons"]["enabled"].get():
+                    if os.path.exists(btn_path):
+                        btn_content = read_file(btn_path)
+                    else:
+                        btn_content = ""
+                    btn_content = remove_blocks_for_key(btn_content, f"{key}_button_")
+                    if buttons_data:
+                        sep = "\n\n" if btn_content.strip() else ""
+                        btn_content = btn_content.rstrip() + sep + generate_buttons(je, buttons_data)
+                    if btn_content.strip() or os.path.exists(btn_path):
+                        with open(btn_path, "w", encoding="utf-8") as f:
+                            f.write(btn_content)
+
+                # ── PB file : seulement si progress bars activées ──
+                if features_data["progress_bars"]["enabled"].get():
+                    pb_content = read_file(pb_path) if os.path.exists(pb_path) else ""
+                    pb_content = remove_blocks_for_key(pb_content, f"{key}_")
+                    if progress_bars:
+                        pb_content = pb_content.rstrip() + "\n"
+                        for pb in progress_bars:
+                            pb_content += generate_progress_bar(pb)
+                    if pb_content.strip() or os.path.exists(pb_path):
+                        with open(pb_path, "w", encoding="utf-8") as f:
+                            f.write(pb_content)
+
+                messagebox.showinfo("Succès", f"{key} sauvegardée avec succès !")
+                return
+
+            # ══ MODE COMPLET : nouvelle JE (bloc absent) ═════════════════
+            options = {
+                "buttons":             num_buttons,
+                "progress_bars":       progress_bars,
+                "status_desc":         status_desc_list,
+                "monthly_empty":       features_data["monthly_empty"]["enabled"].get(),
+                "yearly":              features_data["yearly"]["enabled"].get(),
+                "is_shown":            is_shown_list,
+                "possible_conditions": possible_cond,
+                "complete_conditions": complete_cond,
+                "fail_conditions":     fail_cond,
+            }
+
+            new_je_block = generate_je_block(je, options)
+
+            # ── JE file : ajouter le bloc ──
+            je_content += "\n" + new_je_block
             with open(je_path, "w", encoding="utf-8") as f:
                 f.write(je_content)
 
-            # ── Loc file : supprimer + réécrire ─────────────
+            # ── Loc file ──
             loc_content = read_file(loc_path) if os.path.exists(loc_path) else "l_english:\n"
             loc_content = remove_loc_entries(loc_content, key)
             loc_content = loc_content.rstrip() + "\n\n"
@@ -1392,7 +1582,7 @@ def build_manage_tab(parent, path_var, tag_var):
             with open(loc_path, "w", encoding="utf-8") as f:
                 f.write(loc_content)
 
-            # ── Button file : supprimer + réécrire ──────────
+            # ── Button file ──
             if os.path.exists(btn_path):
                 btn_content = read_file(btn_path)
                 btn_content = remove_blocks_for_key(btn_content, f"{key}_button_")
@@ -1404,7 +1594,7 @@ def build_manage_tab(parent, path_var, tag_var):
                 with open(btn_path, "w", encoding="utf-8") as f:
                     f.write(generate_buttons(je, buttons_data))
 
-            # ── PB file : supprimer + réécrire ──────────────
+            # ── PB file ──
             pb_content = read_file(pb_path) if os.path.exists(pb_path) else ""
             pb_content = remove_blocks_for_key(pb_content, f"{key}_")
             if progress_bars:
