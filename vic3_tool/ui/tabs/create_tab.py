@@ -148,11 +148,11 @@ def build_create_tab(notebook, path_var, tag_var):
              "la JE se complète quand current_value atteint goal_add_value.",
              foreground="gray", justify="left").pack(anchor="w", pady=(0, 8))
 
-    # Variable globale
+    # Variable globale (auto-générée)
     row_gv = ttk.Frame(gp_frame); row_gv.pack(fill="x", pady=3)
     tk.Label(row_gv, text="Variable globale :", width=20, anchor="w").pack(side="left")
-    gp_global_var = tk.StringVar(value="variable_global_ici")
-    tk.Entry(row_gv, textvariable=gp_global_var, width=36).pack(side="left", padx=4)
+    tk.Label(row_gv, text="(auto-générée : TAG_je_N_global_variable_progress_bar_1)",
+             foreground="blue", font=("Consolas", 9)).pack(side="left", padx=4)
 
     # Goal value
     row_goal = ttk.Frame(gp_frame); row_goal.pack(fill="x", pady=3)
@@ -197,6 +197,15 @@ def build_create_tab(notebook, path_var, tag_var):
         ("Rouge double", "double_sided_bad = yes"),
     ]:
         tk.Radiobutton(row_pb3, text=label, variable=gp_pb_color, value=val).pack(side="left")
+
+    # Tooltip complete
+    ttk.Separator(gp_frame, orient="horizontal").pack(fill="x", pady=6)
+    row_tt = ttk.Frame(gp_frame); row_tt.pack(fill="x", pady=3)
+    tk.Label(row_tt, text="Tooltip complete :", width=20, anchor="w").pack(side="left")
+    gp_tt_complete = tk.StringVar(value="")
+    tk.Entry(row_tt, textvariable=gp_tt_complete, width=54).pack(side="left", padx=4)
+    tk.Label(gp_frame, text="(défaut auto : [GetGlobalVariable('...').GetValue|D])",
+             foreground="gray", font=("", 8)).pack(anchor="w")
 
     # -------- initialisation features_data AVANT tout --------
     features_data = {
@@ -487,15 +496,27 @@ def build_create_tab(notebook, path_var, tag_var):
     # AJOUT DES FEATURES
     # ============================================================
 
-    make_feature(scroll_frame, "is_shown",      "is_shown_when_inactive",        build_is_shown_config)
-    make_feature(scroll_frame, "possible",      "possible (conditions supp.)",   build_possible_config)
-    make_feature(scroll_frame, "complete",      "complete",                      build_complete_config)
-    make_feature(scroll_frame, "fail",          "fail",                          build_fail_config)
-    make_feature(scroll_frame, "buttons",       "Boutons",                       build_buttons_config)
-    make_feature(scroll_frame, "status_desc",   "Status desc",                   build_status_config)
-    make_feature(scroll_frame, "progress_bars", "Progress bars",                 build_pb_config)
-    make_feature(scroll_frame, "monthly_empty", "on_monthly_pulse (vide)",       build_empty)
-    make_feature(scroll_frame, "yearly",        "on_yearly_pulse (vide)",        build_empty)
+    features_columns = ttk.Frame(scroll_frame)
+    features_columns.pack(fill="x", padx=4, pady=2)
+
+    col_left = ttk.Frame(features_columns)
+    col_mid = ttk.Frame(features_columns)
+    col_right = ttk.Frame(features_columns)
+    col_left.pack(side="left", fill="x", expand=True, anchor="n")
+    col_mid.pack(side="left", fill="x", expand=True, anchor="n", padx=12)
+    col_right.pack(side="left", fill="x", expand=True, anchor="n")
+
+    make_feature(col_left,  "is_shown",      "is_shown_when_inactive",      build_is_shown_config)
+    make_feature(col_left,  "possible",      "possible (conditions supp.)", build_possible_config)
+    make_feature(col_left,  "complete",      "complete",                    build_complete_config)
+    make_feature(col_left,  "fail",          "fail",                        build_fail_config)
+
+    make_feature(col_mid,   "buttons",       "Boutons",                     build_buttons_config)
+    make_feature(col_mid,   "status_desc",   "Status desc",                 build_status_config)
+    make_feature(col_mid,   "progress_bars", "Progress bars",               build_pb_config)
+
+    make_feature(col_right, "monthly_empty", "on_monthly_pulse",            build_empty)
+    make_feature(col_right, "yearly",        "on_yearly_pulse",             build_empty)
 
     # ============================================================
     # BOUTON GÉNÉRER
@@ -514,24 +535,24 @@ def build_create_tab(notebook, path_var, tag_var):
 
         # ── Onglet "Goal Value + Progress Bar" ───────────────────────────────
         if feat_notebook.index(feat_notebook.select()) == 1:
-            global_var  = gp_global_var.get().strip()
             goal_value  = gp_goal_value.get().strip()
             pb_name     = gp_pb_name.get().strip()
             pb_desc     = gp_pb_desc.get().strip()
             pb_max      = gp_pb_max.get().strip()
             pb_color    = gp_pb_color.get()
             pulse       = gp_pulse.get()
+            tt_complete = gp_tt_complete.get().strip()
 
-            if not global_var or not goal_value or not pb_max:
-                messagebox.showerror("Erreur", "Variable globale, Goal value et Max value sont obligatoires.")
+            if not goal_value or not pb_max:
+                messagebox.showerror("Erreur", "Goal value et Max value sont obligatoires.")
                 return
             try:
                 create_je_goal_progress(
                     base_path=base_path, tag=tag, year=year, title=title, desc=desc,
-                    global_var=global_var, goal_value=goal_value,
+                    goal_value=goal_value,
                     pb_name=pb_name, pb_desc=pb_desc,
                     pb_color=pb_color, pb_max_value=pb_max,
-                    pulse=pulse,
+                    pulse=pulse, tt_complete=tt_complete,
                 )
                 messagebox.showinfo("Succès", "Journal Entry (Goal + Progress Bar) générée avec succès !")
             except Exception as e:

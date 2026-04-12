@@ -25,7 +25,10 @@ def generate_je_goal_progress_block(je, global_var, pb_key, goal_value, pulse="m
     }}
 
     complete = {{
-        scope:journal_entry = {{ is_goal_complete = yes }}
+        custom_tooltip = {{
+            text = {je.key}_tt_complete_1
+            scope:journal_entry = {{ is_goal_complete = yes }}
+        }}
     }}
 
     fail = {{

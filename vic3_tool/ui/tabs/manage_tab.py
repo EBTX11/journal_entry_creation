@@ -172,6 +172,7 @@ def parse_je_data(je_path, loc_path, btn_path, pb_path, key):
         "goal_pb_desc": "",
         "goal_pb_color": "default_green = yes",
         "goal_pb_max": "10",
+        "goal_tt_complete": "",
     }
     je_content  = read_file(je_path)
     loc_content = read_file(loc_path)
@@ -231,6 +232,9 @@ def parse_je_data(je_path, loc_path, btn_path, pb_path, key):
         data["goal_value"] = m.group(1)
     if re.search(r'on_yearly_pulse\s*=\s*\{', block):
         data["goal_pulse"] = "yearly"
+    m = re.search(rf'^\s*{safe}_tt_complete_1:0\s+"(.*?)"', loc_content, re.MULTILINE)
+    if m:
+        data["goal_tt_complete"] = m.group(1)
 
     # Flags
     data["monthly_empty"] = bool(re.search(r'on_monthly_pulse', block))
@@ -552,8 +556,9 @@ def build_manage_tab(parent, path_var, tag_var):
 
     row_gv = ttk.Frame(gp_frame); row_gv.pack(fill="x", pady=3)
     ttk.Label(row_gv, text="Variable globale :", width=20, anchor="w").pack(side="left")
-    gp_global_var = tk.StringVar(value="variable_global_ici")
-    ttk.Entry(row_gv, textvariable=gp_global_var, width=36).pack(side="left", padx=4)
+    gp_global_var = tk.StringVar(value="(chargez une JE)")
+    ttk.Label(row_gv, textvariable=gp_global_var,
+              foreground="blue", font=("Consolas", 9)).pack(side="left", padx=4)
 
     row_goal = ttk.Frame(gp_frame); row_goal.pack(fill="x", pady=3)
     ttk.Label(row_goal, text="goal_add_value :", width=20, anchor="w").pack(side="left")
@@ -593,6 +598,14 @@ def build_manage_tab(parent, path_var, tag_var):
         ("Rouge double", "double_sided_bad = yes"),
     ]:
         tk.Radiobutton(row_pb3, text=lbl, variable=gp_pb_color, value=val).pack(side="left")
+
+    ttk.Separator(gp_frame, orient="horizontal").pack(fill="x", pady=(8, 4))
+    row_tt = ttk.Frame(gp_frame); row_tt.pack(fill="x", pady=3)
+    ttk.Label(row_tt, text="Tooltip complete :", width=20, anchor="w").pack(side="left")
+    gp_tt_complete = tk.StringVar(value="")
+    ttk.Entry(row_tt, textvariable=gp_tt_complete, width=54).pack(side="left", padx=4)
+    ttk.Label(gp_frame, text="(défaut auto : [GetGlobalVariable('...').GetValue|D])",
+              foreground="gray", font=("", 8)).pack(anchor="w")
 
     tk.Button(gp_frame, text="Sauvegarder Goal Value + Progress Bar",
               command=lambda: save_goal_mode(),
@@ -929,17 +942,18 @@ def build_manage_tab(parent, path_var, tag_var):
         _title = title_var.get().strip()
         _desc  = desc_text.get("1.0", "end").strip()
 
-        global_var = gp_global_var.get().strip()
-        goal_value = gp_goal_value.get().strip()
-        pb_name    = gp_pb_name.get().strip()
-        pb_desc    = gp_pb_desc.get().strip()
-        pb_max     = gp_pb_max.get().strip()
-        pb_color   = gp_pb_color.get()
-        pulse      = gp_pulse.get()
+        global_var  = f"{key}_global_variable_progress_bar_1"
+        tt_complete = gp_tt_complete.get().strip() or f"[GetGlobalVariable('{global_var}').GetValue|D]"
+        goal_value  = gp_goal_value.get().strip()
+        pb_name     = gp_pb_name.get().strip()
+        pb_desc     = gp_pb_desc.get().strip()
+        pb_max      = gp_pb_max.get().strip()
+        pb_color    = gp_pb_color.get()
+        pulse       = gp_pulse.get()
 
-        if not global_var or not goal_value or not pb_max:
+        if not goal_value or not pb_max:
             messagebox.showerror("Erreur",
-                                 "Variable globale, Goal value et Max value sont obligatoires.")
+                                 "Goal value et Max value sont obligatoires.")
             return
 
         pb_key   = f"{key}_1_progress_bar"
@@ -958,6 +972,16 @@ def build_manage_tab(parent, path_var, tag_var):
 
             je_block = je_content[br[0]:br[1]]
 
+            # complete block avec custom_tooltip
+            je_block = patch_named_block_in(
+                je_block, "complete",
+                f"    complete = {{\n"
+                f"        custom_tooltip = {{\n"
+                f"            text = {key}_tt_complete_1\n"
+                f"            scope:journal_entry = {{ is_goal_complete = yes }}\n"
+                f"        }}\n"
+                f"    }}"
+            )
             # current_value
             je_block = patch_named_block_in(
                 je_block, "current_value",
@@ -1011,6 +1035,23 @@ def build_manage_tab(parent, path_var, tag_var):
             with open(_je_path, "w", encoding="utf-8") as f:
                 f.write(je_content)
 
+            # Historique variable globale
+            hist_path = os.path.join(_base, "common/history/global/00_hmmai_global.txt")
+            if os.path.exists(hist_path):
+                hist_content = read_file(hist_path)
+                if global_var not in hist_content:
+                    var_init = (
+                        f"\n    set_global_variable = {{\n"
+                        f"        name = {global_var}\n"
+                        f"        value = 0\n"
+                        f"    }}\n"
+                    )
+                    last_b = hist_content.rfind('}')
+                    if last_b >= 0:
+                        hist_content = hist_content[:last_b] + var_init + hist_content[last_b:]
+                        with open(hist_path, "w", encoding="utf-8") as f:
+                            f.write(hist_content)
+
             # PB file
             pb_data = {
                 "key": pb_key, "name": pb_name, "desc": pb_desc, "color": pb_color,
@@ -1024,15 +1065,17 @@ def build_manage_tab(parent, path_var, tag_var):
             with open(_pb_path, "w", encoding="utf-8") as f:
                 f.write(pb_content)
 
-            # Loc : titre/desc + entrées PB uniquement
+            # Loc : titre/desc + entrées PB + tt_complete
             _safe = re.escape(key)
             loc_content = read_file(_loc_path) if os.path.exists(_loc_path) else "l_english:\n"
-            loc_content = re.sub(rf'[ \t]*{_safe}:0[^\n]*\n',                '', loc_content)
-            loc_content = re.sub(rf'[ \t]*{_safe}_reason:0[^\n]*\n',         '', loc_content)
-            loc_content = re.sub(rf'[ \t]*{_safe}_\d+_progress_bar[^\n]*\n', '', loc_content)
+            loc_content = re.sub(rf'[ \t]*{_safe}:0[^\n]*\n',                   '', loc_content)
+            loc_content = re.sub(rf'[ \t]*{_safe}_reason:0[^\n]*\n',            '', loc_content)
+            loc_content = re.sub(rf'[ \t]*{_safe}_tt_complete_1:0[^\n]*\n',     '', loc_content)
+            loc_content = re.sub(rf'[ \t]*{_safe}_\d+_progress_bar[^\n]*\n',   '', loc_content)
             loc_content = loc_content.rstrip() + '\n\n'
             loc_content += f'  {key}:0 "{_title}"\n'
             loc_content += f'  {key}_reason:0 "{format_text(_desc)}"\n'
+            loc_content += f'  {key}_tt_complete_1:0 "{tt_complete}"\n'
             loc_content += f'  {pb_key}:0 "{pb_name}"\n'
             loc_content += f'  {pb_key}_desc:0 "{pb_desc}"\n'
             with open(_loc_path, "w", encoding="utf-8") as f:
@@ -1316,15 +1359,27 @@ def build_manage_tab(parent, path_var, tag_var):
             messagebox.showerror("Erreur", f"{type(e).__name__}: {e!s}")
 
     # ── Assemblage du formulaire ────────────────────────────
-    make_feature(scroll_frame, "is_shown",      "is_shown_when_inactive",        build_is_shown_config)
-    make_feature(scroll_frame, "possible",      "possible (conditions supp.)",   build_possible_config)
-    make_feature(scroll_frame, "complete",      "complete",                      build_complete_config)
-    make_feature(scroll_frame, "fail",          "fail",                          build_fail_config)
-    make_feature(scroll_frame, "buttons",       "Boutons",                       build_buttons_config)
-    make_feature(scroll_frame, "status_desc",   "Status desc",                   build_status_config)
-    make_feature(scroll_frame, "progress_bars", "Progress bars",                 build_pb_config)
-    make_feature(scroll_frame, "monthly_empty", "on_monthly_pulse (vide)",       build_empty)
-    make_feature(scroll_frame, "yearly",        "on_yearly_pulse (vide)",        build_empty)
+    features_columns = ttk.Frame(scroll_frame)
+    features_columns.pack(fill="x", padx=4, pady=2)
+
+    col_left = ttk.Frame(features_columns)
+    col_mid = ttk.Frame(features_columns)
+    col_right = ttk.Frame(features_columns)
+    col_left.pack(side="left", fill="x", expand=True, anchor="n")
+    col_mid.pack(side="left", fill="x", expand=True, anchor="n", padx=12)
+    col_right.pack(side="left", fill="x", expand=True, anchor="n")
+
+    make_feature(col_left,  "is_shown",      "is_shown_when_inactive",      build_is_shown_config)
+    make_feature(col_left,  "possible",      "possible (conditions supp.)", build_possible_config)
+    make_feature(col_left,  "complete",      "complete",                    build_complete_config)
+    make_feature(col_left,  "fail",          "fail",                        build_fail_config)
+
+    make_feature(col_mid,   "buttons",       "Boutons",                     build_buttons_config)
+    make_feature(col_mid,   "status_desc",   "Status desc",                 build_status_config)
+    make_feature(col_mid,   "progress_bars", "Progress bars",               build_pb_config)
+
+    make_feature(col_right, "monthly_empty", "on_monthly_pulse",            build_empty)
+    make_feature(col_right, "yearly",        "on_yearly_pulse",             build_empty)
 
     # ── Bouton sauvegarder ──────────────────────────────────
     tk.Button(right, text="Créer / Régénérer la JE complète", command=lambda: on_save(),
@@ -1360,13 +1415,14 @@ def build_manage_tab(parent, path_var, tag_var):
         year_var.set("")
         title_var.set("")
         desc_text.delete("1.0", "end")
-        gp_global_var.set("variable_global_ici")
+        gp_global_var.set("(chargez une JE)")
         gp_goal_value.set("6")
         gp_pulse.set("monthly")
         gp_pb_name.set("")
         gp_pb_desc.set("")
         gp_pb_max.set("10")
         gp_pb_color.set("default_green = yes")
+        gp_tt_complete.set("")
         mode_notebook.select(tab_standard)
 
         for fk in features_data:
@@ -1452,13 +1508,18 @@ def build_manage_tab(parent, path_var, tag_var):
         title_var.set(d["title"])
         desc_text.delete("1.0", "end")
         desc_text.insert("1.0", d["desc"])
-        gp_global_var.set(d["goal_global_var"] or "variable_global_ici")
+        _auto_var = f"{key}_global_variable_progress_bar_1"
+        gp_global_var.set(_auto_var)
         gp_goal_value.set(d["goal_value"] or "6")
         gp_pulse.set(d["goal_pulse"] or "monthly")
         gp_pb_name.set(d["goal_pb_name"])
         gp_pb_desc.set(d["goal_pb_desc"])
         gp_pb_max.set(d["goal_pb_max"] or "10")
         gp_pb_color.set(d["goal_pb_color"] or "default_green = yes")
+        gp_tt_complete.set(
+            d["goal_tt_complete"] or
+            f"[GetGlobalVariable('{_auto_var}').GetValue|D]"
+        )
         mode_notebook.select(tab_goal if d["goal_mode"] else tab_standard)
 
         # ── is_shown ──
@@ -1626,16 +1687,17 @@ def build_manage_tab(parent, path_var, tag_var):
         desc  = desc_text.get("1.0", "end").strip()
 
         if mode_notebook.index(mode_notebook.select()) == 1:
-            global_var = gp_global_var.get().strip()
-            goal_value = gp_goal_value.get().strip()
-            pb_name = gp_pb_name.get().strip()
-            pb_desc = gp_pb_desc.get().strip()
-            pb_max = gp_pb_max.get().strip()
-            pb_color = gp_pb_color.get()
-            pulse = gp_pulse.get()
+            global_var  = f"{key}_global_variable_progress_bar_1"
+            tt_complete = gp_tt_complete.get().strip() or f"[GetGlobalVariable('{global_var}').GetValue|D]"
+            goal_value  = gp_goal_value.get().strip()
+            pb_name     = gp_pb_name.get().strip()
+            pb_desc     = gp_pb_desc.get().strip()
+            pb_max      = gp_pb_max.get().strip()
+            pb_color    = gp_pb_color.get()
+            pulse       = gp_pulse.get()
 
-            if not global_var or not goal_value or not pb_max:
-                messagebox.showerror("Erreur", "Variable globale, Goal value et Max value sont obligatoires.")
+            if not goal_value or not pb_max:
+                messagebox.showerror("Erreur", "Goal value et Max value sont obligatoires.")
                 return
 
             m = re.match(r'(.+)_je_(\d+)', key)
@@ -1670,10 +1732,28 @@ def build_manage_tab(parent, path_var, tag_var):
                 with open(je_path, "w", encoding="utf-8") as f:
                     f.write(je_content)
 
+                # Historique variable globale
+                hist_path = os.path.join(base_path, "common/history/global/00_hmmai_global.txt")
+                if os.path.exists(hist_path):
+                    hist_content = read_file(hist_path)
+                    if global_var not in hist_content:
+                        var_init = (
+                            f"\n    set_global_variable = {{\n"
+                            f"        name = {global_var}\n"
+                            f"        value = 0\n"
+                            f"    }}\n"
+                        )
+                        last_b = hist_content.rfind('}')
+                        if last_b >= 0:
+                            hist_content = hist_content[:last_b] + var_init + hist_content[last_b:]
+                            with open(hist_path, "w", encoding="utf-8") as f:
+                                f.write(hist_content)
+
                 loc_content = read_file(loc_path) if os.path.exists(loc_path) else "l_english:\n"
                 loc_content = remove_loc_entries(loc_content, key)
                 loc_content = loc_content.rstrip() + "\n\n"
                 loc_content += generate_localization(je, [], [pb_data], None)
+                loc_content += f'  {key}_tt_complete_1:0 "{tt_complete}"\n'
                 with open(loc_path, "w", encoding="utf-8") as f:
                     f.write(loc_content)
 
@@ -1689,7 +1769,7 @@ def build_manage_tab(parent, path_var, tag_var):
                 with open(pb_path, "w", encoding="utf-8") as f:
                     f.write(pb_content)
 
-                messagebox.showinfo("SuccÃ¨s", f"{key} sauvegardÃ©e avec succÃ¨s !")
+                messagebox.showinfo("Succès", f"{key} sauvegardée avec succès !")
             except Exception as e:
                 messagebox.showerror("Erreur", f"{type(e).__name__}: {e!s}")
             return

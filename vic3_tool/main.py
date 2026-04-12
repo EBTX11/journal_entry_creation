@@ -89,26 +89,34 @@ def create_full_je(
 
 def create_je_goal_progress(
     base_path, tag, year, title, desc,
-    global_var, goal_value,
+    goal_value,
     pb_name, pb_desc, pb_color, pb_max_value,
-    pulse="monthly",
+    pulse="monthly", tt_complete="",
 ):
-    je_path  = os.path.join(base_path, "common/journal_entries", f"{tag}.txt")
-    pb_path  = os.path.join(base_path, "common/scripted_progress_bars", "hmmf_progressbar.txt")
-    loc_path = os.path.join(base_path, "localization/english", "01_hmmf_je_localization_l_english.yml")
+    je_path   = os.path.join(base_path, "common/journal_entries", f"{tag}.txt")
+    pb_path   = os.path.join(base_path, "common/scripted_progress_bars", "hmmf_progressbar.txt")
+    loc_path  = os.path.join(base_path, "localization/english", "01_hmmf_je_localization_l_english.yml")
+    hist_path = os.path.join(base_path, "common/history/global/00_hmmai_global.txt")
 
     ensure_folder(os.path.dirname(je_path))
     ensure_folder(os.path.dirname(pb_path))
     ensure_folder(os.path.dirname(loc_path))
 
-    index  = get_next_je_index(tag, je_path)
-    je     = JournalEntry(tag, index, year, title, desc)
-    pb_key = f"{je.key}_1_progress_bar"
+    index      = get_next_je_index(tag, je_path)
+    je         = JournalEntry(tag, index, year, title, desc)
+    pb_key     = f"{je.key}_1_progress_bar"
+    global_var = f"{je.key}_global_variable_progress_bar_1"
+
+    _gv_suffix  = f"[GetGlobalVariable('{global_var}').GetValue|D]/ {goal_value}"
+    tt_complete = (f"{tt_complete} " if tt_complete else "") + _gv_suffix
+
+    pb_desc_suffix = f" {_gv_suffix}/ {goal_value}"
+    pb_desc_final  = pb_desc + pb_desc_suffix if pb_desc else pb_desc_suffix.strip()
 
     pb_data = {
         "key":           pb_key,
         "name":          pb_name,
-        "desc":          pb_desc,
+        "desc":          pb_desc_final,
         "color":         pb_color,
         "start":         "0",
         "min":           "0",
@@ -119,6 +127,25 @@ def create_je_goal_progress(
         "monthly_desc":  None,
     }
 
-    append_to_file(je_path,  "\n" + generate_je_goal_progress_block(je, global_var, pb_key, goal_value, pulse))
-    append_to_file(pb_path,  generate_progress_bar(pb_data))
-    append_to_file(loc_path, "\n" + generate_localization(je, [], [pb_data], None))
+    append_to_file(je_path, "\n" + generate_je_goal_progress_block(je, global_var, pb_key, goal_value, pulse))
+    append_to_file(pb_path, generate_progress_bar(pb_data))
+
+    loc_block  = "\n" + generate_localization(je, [], [pb_data], None)
+    loc_block += f'  {je.key}_tt_complete_1:0 "{tt_complete}"\n'
+    append_to_file(loc_path, loc_block)
+
+    # Initialiser la variable globale dans l'historique
+    if os.path.exists(hist_path):
+        hist_content = read_file(hist_path)
+        if global_var not in hist_content:
+            var_init = (
+                f"\n    set_global_variable = {{\n"
+                f"        name = {global_var}\n"
+                f"        value = 0\n"
+                f"    }}\n"
+            )
+            last_b = hist_content.rfind('}')
+            if last_b >= 0:
+                hist_content = hist_content[:last_b] + var_init + hist_content[last_b:]
+                with open(hist_path, "w", encoding="utf-8") as f:
+                    f.write(hist_content)
