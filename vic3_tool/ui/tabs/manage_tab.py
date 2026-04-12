@@ -10,7 +10,7 @@ from vic3_tool.generators.progress_bar_generator import generate_progress_bar
 from vic3_tool.models.journal_entry import JournalEntry
 from vic3_tool.utils.file_manager import read_file
 from vic3_tool.ui.tabs.create_tab import (
-    CONDITION_SPECS, CONDITION_NAMES, CONDITION_MAP, DLC_OPTIONS
+    CONDITION_SPECS, CONDITION_NAMES, CONDITION_MAP, DLC_OPTIONS, make_tt_list
 )
 
 # ================================================================
@@ -223,22 +223,76 @@ def parse_je_data(je_path, loc_path, btn_path, pb_path, key):
     btn_keys = re.findall(rf'scripted_button\s*=\s*({re.escape(key)}_button_\d+)', block)
     for bk in btn_keys:
         sb = re.escape(bk)
-        bd = {"name": "", "desc": "", "tt1": "", "tt2": "", "cooldown": ""}
+        bd = {
+            "name": "", "desc": "", "cooldown": "",
+            "possible_tts": [], "effect_tts": [],
+            "possible_modified": False, "possible_raw": None,
+            "possible_existing_tt_count": 0,
+        }
+
+        # Nom / Desc
         for field, pattern in [
-            ("name",  rf'^\s*{sb}:0\s+"(.*?)"'),
-            ("desc",  rf'^\s*{sb}_desc:0\s+"(.*?)"'),
-            ("tt1",   rf'^\s*{sb}_tt_1:0\s+"(.*?)"'),
-            ("tt2",   rf'^\s*{sb}_tt_2:0\s+"(.*?)"'),
+            ("name", rf'^\s*{sb}:0\s+"(.*?)"'),
+            ("desc", rf'^\s*{sb}_desc:0\s+"(.*?)"'),
         ]:
             mm = re.search(pattern, loc_content, re.MULTILINE)
             if mm:
                 bd[field] = mm.group(1)
+
+        # possible TTs — nouveau format _tt_possible_N
+        j = 1
+        while True:
+            mm = re.search(rf'^\s*{sb}_tt_possible_{j}:0\s+"(.*?)"', loc_content, re.MULTILINE)
+            if not mm:
+                break
+            bd["possible_tts"].append(mm.group(1))
+            j += 1
+        # Rétrocompat : ancien format _tt_1
+        if not bd["possible_tts"]:
+            mm = re.search(rf'^\s*{sb}_tt_1:0\s+"(.*?)"', loc_content, re.MULTILINE)
+            if mm:
+                bd["possible_tts"] = [mm.group(1)]
+
+        # effect TTs — nouveau format _tt_effect_N
+        j = 1
+        while True:
+            mm = re.search(rf'^\s*{sb}_tt_effect_{j}:0\s+"(.*?)"', loc_content, re.MULTILINE)
+            if not mm:
+                break
+            bd["effect_tts"].append(mm.group(1))
+            j += 1
+        # Rétrocompat : ancien format _tt_2
+        if not bd["effect_tts"]:
+            mm = re.search(rf'^\s*{sb}_tt_2:0\s+"(.*?)"', loc_content, re.MULTILINE)
+            if mm:
+                bd["effect_tts"] = [mm.group(1)]
+
         if btn_content:
             bb = extract_named_block(btn_content, bk)
             if bb:
+                # Cooldown
                 cd = re.search(r'cooldown\s*=\s*\{[^}]*days\s*=\s*(\d+)', bb)
                 if cd:
                     bd["cooldown"] = cd.group(1)
+
+                # Détection de modification manuelle dans le bloc possible
+                possible_raw = extract_named_block(bb, "possible")
+                if possible_raw is not None:
+                    # Supprime les custom_tooltip standards (nouveau et ancien format)
+                    cleaned = re.sub(
+                        rf'custom_tooltip\s*=\s*\{{\s*text\s*=\s*{re.escape(bk)}_tt_possible_\d+\s*\}}',
+                        '', possible_raw
+                    )
+                    cleaned = re.sub(
+                        rf'custom_tooltip\s*=\s*\{{\s*text\s*=\s*{re.escape(bk)}_tt_1\s*\}}',
+                        '', cleaned
+                    )
+                    if cleaned.strip():
+                        bd["possible_modified"] = True
+                        bd["possible_raw"] = possible_raw
+
+        # Nombre de TT qui existent déjà dans le bloc possible (référence pour les ajouts futurs)
+        bd["possible_existing_tt_count"] = len(bd["possible_tts"])
         data["buttons"].append(bd)
 
     # Progress bars
@@ -516,43 +570,54 @@ def build_manage_tab(parent, path_var, tag_var):
 
         def refresh_buttons(*_):
             saved = [
-                {"name": r["name"].get(), "desc": r["desc"].get(),
-                 "tt1": r["tt1"].get(), "tt2": r["tt2"].get(),
-                 "cooldown": r["cooldown"].get()}
+                {"name":                      r["name"].get(),
+                 "desc":                      r["desc"].get(),
+                 "cooldown":                  r["cooldown"].get(),
+                 "possible_tts":              r["possible_tts"]["get"](),
+                 "effect_tts":                r["effect_tts"]["get"](),
+                 "possible_modified":         r.get("possible_modified", False),
+                 "possible_raw":              r.get("possible_raw", None),
+                 "possible_existing_tt_count": r.get("possible_existing_tt_count", 0)}
                 for r in features_data["buttons"]["rows"]
             ]
             for w in btn_rows_frame.winfo_children():
                 w.destroy()
             features_data["buttons"]["rows"].clear()
             for i in range(1, num_var.get() + 1):
+                s = saved[i - 1] if i - 1 < len(saved) else {}
                 lf = ttk.LabelFrame(btn_rows_frame, text=f"Bouton {i}")
                 lf.pack(fill="x", pady=2)
+
                 r1 = ttk.Frame(lf); r1.pack(fill="x", pady=1)
                 ttk.Label(r1, text="Nom").pack(side="left")
-                nv = tk.StringVar()
+                nv = tk.StringVar(value=s.get("name", ""))
                 ttk.Entry(r1, textvariable=nv, width=16).pack(side="left", padx=4)
                 ttk.Label(r1, text="Desc").pack(side="left")
-                dv = tk.StringVar()
+                dv = tk.StringVar(value=s.get("desc", ""))
                 ttk.Entry(r1, textvariable=dv, width=20).pack(side="left", padx=4)
-                r2 = ttk.Frame(lf); r2.pack(fill="x", pady=1)
-                ttk.Label(r2, text="TT1").pack(side="left")
-                t1 = tk.StringVar()
-                ttk.Entry(r2, textvariable=t1, width=14).pack(side="left", padx=2)
-                ttk.Label(r2, text="TT2").pack(side="left")
-                t2 = tk.StringVar()
-                ttk.Entry(r2, textvariable=t2, width=14).pack(side="left", padx=2)
-                ttk.Label(r2, text="Cooldown (j)").pack(side="left", padx=(8, 0))
-                cd = tk.StringVar()
-                ttk.Entry(r2, textvariable=cd, width=6).pack(side="left", padx=2)
+                ttk.Label(r1, text="Cooldown (j)").pack(side="left", padx=(8, 0))
+                cd = tk.StringVar(value=s.get("cooldown", ""))
+                ttk.Entry(r1, textvariable=cd, width=6).pack(side="left", padx=2)
 
-                if i - 1 < len(saved):
-                    s = saved[i - 1]
-                    nv.set(s["name"]); dv.set(s["desc"])
-                    t1.set(s["tt1"]);  t2.set(s["tt2"]); cd.set(s["cooldown"])
+                pos_tts = make_tt_list(lf, "possible :", s.get("possible_tts", [""]))
+                eff_tts = make_tt_list(lf, "effect :",   s.get("effect_tts",   [""]))
 
-                features_data["buttons"]["rows"].append(
-                    {"name": nv, "desc": dv, "tt1": t1, "tt2": t2, "cooldown": cd}
-                )
+                pmod = s.get("possible_modified", False)
+                praw = s.get("possible_raw", None)
+                if pmod:
+                    ttk.Label(lf,
+                              text="⚠ possible modifié manuellement — non écrasé à la sauvegarde",
+                              foreground="orange").pack(anchor="w", pady=1)
+
+                petc = s.get("possible_existing_tt_count", 0)
+                features_data["buttons"]["rows"].append({
+                    "name": nv, "desc": dv, "cooldown": cd,
+                    "possible_tts":               pos_tts,
+                    "effect_tts":                 eff_tts,
+                    "possible_modified":           pmod,
+                    "possible_raw":               praw,
+                    "possible_existing_tt_count": petc,
+                })
 
         ttk.Spinbox(parent, from_=1, to=10, textvariable=num_var,
                     width=4, command=refresh_buttons).pack(anchor="w")
@@ -763,16 +828,54 @@ def build_manage_tab(parent, path_var, tag_var):
         # ── Boutons ──
         if d["buttons"]:
             features_data["buttons"]["enabled"].set(True)
+            # On injecte les données parsées dans saved avant le refresh
+            # via un refresh avec données pré-chargées
             n = len(d["buttons"])
             features_data["buttons"]["num"].set(n)
-            features_data["buttons"]["_refresh"]()
-            for i, bd in enumerate(d["buttons"]):
-                row = features_data["buttons"]["rows"][i]
-                row["name"].set(bd["name"])
-                row["desc"].set(bd["desc"])
-                row["tt1"].set(bd["tt1"])
-                row["tt2"].set(bd["tt2"])
-                row["cooldown"].set(bd["cooldown"])
+            # Pré-charger les données dans une liste temporaire
+            _preload = d["buttons"]
+
+            def _refresh_with_data():
+                btn_rows_frame = features_data["buttons"]["_rows_frame"]
+                for w in btn_rows_frame.winfo_children():
+                    w.destroy()
+                features_data["buttons"]["rows"].clear()
+                for i, bd in enumerate(_preload, start=1):
+                    lf = ttk.LabelFrame(btn_rows_frame, text=f"Bouton {i}")
+                    lf.pack(fill="x", pady=2)
+
+                    r1 = ttk.Frame(lf); r1.pack(fill="x", pady=1)
+                    ttk.Label(r1, text="Nom").pack(side="left")
+                    nv = tk.StringVar(value=bd.get("name", ""))
+                    ttk.Entry(r1, textvariable=nv, width=16).pack(side="left", padx=4)
+                    ttk.Label(r1, text="Desc").pack(side="left")
+                    dv = tk.StringVar(value=bd.get("desc", ""))
+                    ttk.Entry(r1, textvariable=dv, width=20).pack(side="left", padx=4)
+                    ttk.Label(r1, text="Cooldown (j)").pack(side="left", padx=(8, 0))
+                    cd = tk.StringVar(value=bd.get("cooldown", ""))
+                    ttk.Entry(r1, textvariable=cd, width=6).pack(side="left", padx=2)
+
+                    pos_tts = make_tt_list(lf, "possible :", bd.get("possible_tts") or [""])
+                    eff_tts = make_tt_list(lf, "effect :",   bd.get("effect_tts")   or [""])
+
+                    pmod = bd.get("possible_modified", False)
+                    praw = bd.get("possible_raw", None)
+                    petc = bd.get("possible_existing_tt_count", 0)
+                    if pmod:
+                        ttk.Label(lf,
+                                  text="⚠ possible modifié manuellement — non écrasé à la sauvegarde",
+                                  foreground="orange").pack(anchor="w", pady=1)
+
+                    features_data["buttons"]["rows"].append({
+                        "name": nv, "desc": dv, "cooldown": cd,
+                        "possible_tts":               pos_tts,
+                        "effect_tts":                 eff_tts,
+                        "possible_modified":           pmod,
+                        "possible_raw":               praw,
+                        "possible_existing_tt_count": petc,
+                    })
+
+            _refresh_with_data()
 
         # ── Status desc ──
         if d["status_desc"]:
@@ -874,10 +977,14 @@ def build_manage_tab(parent, path_var, tag_var):
             num_buttons = features_data["buttons"]["num"].get() or 0
             for r in features_data["buttons"]["rows"]:
                 buttons_data.append({
-                    "name": r["name"].get(), "desc": r["desc"].get(),
-                    "tt1":  r["tt1"].get() or "Nothing",
-                    "tt2":  r["tt2"].get() or "Nothing",
-                    "cooldown": r["cooldown"].get().strip() or None,
+                    "name":                       r["name"].get(),
+                    "desc":                       r["desc"].get(),
+                    "cooldown":                   r["cooldown"].get().strip() or None,
+                    "possible_tts":               r["possible_tts"]["get"]() or ["Nothing"],
+                    "effect_tts":                 r["effect_tts"]["get"]()   or ["Nothing"],
+                    "possible_modified":          r.get("possible_modified", False),
+                    "possible_raw":               r.get("possible_raw", None),
+                    "possible_existing_tt_count": r.get("possible_existing_tt_count", 0),
                 })
 
         # ── Status desc ──

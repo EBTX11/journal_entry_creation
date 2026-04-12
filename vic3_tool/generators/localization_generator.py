@@ -20,13 +20,17 @@ def generate_localization(je, buttons_data, progress_bars=None, status_desc=None
 
         name = btn_data.get("name", "")
         desc = btn_data.get("desc", "")
-        tt1  = btn_data.get("tt1", "Nothing")
-        tt2  = btn_data.get("tt2", "Nothing")
 
         loc += f'  {btn}:0 "{name}"\n'
         loc += f'  {btn}_desc:0 "{desc}"\n'
-        loc += f'  {btn}_tt_1:0 "{tt1}"\n'
-        loc += f'  {btn}_tt_2:0 "{tt2}"\n'
+
+        possible_tts = btn_data.get("possible_tts") or ["Nothing"]
+        for j, tt in enumerate(possible_tts, start=1):
+            loc += f'  {btn}_tt_possible_{j}:0 "{tt or "Nothing"}"\n'
+
+        effect_tts = btn_data.get("effect_tts") or ["Nothing"]
+        for j, tt in enumerate(effect_tts, start=1):
+            loc += f'  {btn}_tt_effect_{j}:0 "{tt or "Nothing"}"\n'
 
     # -------- PROGRESS BARS --------
     if progress_bars:

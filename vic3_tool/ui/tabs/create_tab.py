@@ -40,6 +40,54 @@ DLC_OPTIONS = [
 ]
 
 
+def make_tt_list(parent, label_text, initial_values=None):
+    """
+    Widget liste de custom_tooltip avec label, entrées dynamiques et bouton +.
+    Retourne un dict avec 'get' -> liste de valeurs courantes.
+    """
+    outer = ttk.Frame(parent)
+    outer.pack(fill="x", pady=1)
+    ttk.Label(outer, text=label_text, width=10).pack(side="left", anchor="nw")
+    entries_frame = ttk.Frame(outer)
+    entries_frame.pack(side="left", fill="x", expand=True)
+
+    state = {"vars": []}
+    cur_vals = list(initial_values) if initial_values else [""]
+
+    def rebuild(vals=None):
+        if vals is not None:
+            cur_vals[:] = vals
+        for w in entries_frame.winfo_children():
+            w.destroy()
+        state["vars"] = []
+        for idx, val in enumerate(cur_vals):
+            sv = tk.StringVar(value=val)
+            cell = ttk.Frame(entries_frame)
+            cell.pack(side="left", padx=2)
+            ttk.Label(cell, text=f"TT{idx + 1}").pack(side="left")
+            ttk.Entry(cell, textvariable=sv, width=14).pack(side="left", padx=2)
+
+            def make_remove(i):
+                def remove():
+                    c = [v.get() for v in state["vars"]]
+                    c.pop(i)
+                    rebuild(c if c else [""])
+                return remove
+
+            tk.Button(cell, text="×", command=make_remove(idx),
+                      fg="red", width=2).pack(side="left")
+            state["vars"].append(sv)
+
+    def add_tt():
+        c = [v.get() for v in state["vars"]]
+        c.append("")
+        rebuild(c)
+
+    rebuild()
+    tk.Button(outer, text="+", command=add_tt, width=3).pack(side="left", padx=4)
+    return {"get": lambda: [v.get() for v in state["vars"]], "rebuild": rebuild}
+
+
 def build_create_tab(notebook, path_var, tag_var):
     frame = ttk.Frame(notebook)
     frame.columnconfigure(1, weight=1)
@@ -126,45 +174,39 @@ def build_create_tab(notebook, path_var, tag_var):
 
         def refresh_buttons(*_):
             saved = [
-                {"name": r["name"].get(), "desc": r["desc"].get(),
-                 "tt1": r["tt1"].get(), "tt2": r["tt2"].get(),
-                 "cooldown": r["cooldown"].get()}
+                {"name":         r["name"].get(),
+                 "desc":         r["desc"].get(),
+                 "cooldown":     r["cooldown"].get(),
+                 "possible_tts": r["possible_tts"]["get"](),
+                 "effect_tts":   r["effect_tts"]["get"]()}
                 for r in features_data["buttons"]["rows"]
             ]
             for w in btn_rows_frame.winfo_children():
                 w.destroy()
             features_data["buttons"]["rows"].clear()
             for i in range(1, num_var.get() + 1):
+                s = saved[i - 1] if i - 1 < len(saved) else {}
                 lf = ttk.LabelFrame(btn_rows_frame, text=f"Bouton {i}")
                 lf.pack(fill="x", pady=2)
 
-                row1 = ttk.Frame(lf)
-                row1.pack(fill="x", pady=1)
-                tk.Label(row1, text="Nom").pack(side="left")
-                nv = tk.StringVar()
-                tk.Entry(row1, textvariable=nv, width=16).pack(side="left", padx=4)
-                tk.Label(row1, text="Desc").pack(side="left")
-                dv = tk.StringVar()
-                tk.Entry(row1, textvariable=dv, width=20).pack(side="left", padx=4)
+                r1 = ttk.Frame(lf); r1.pack(fill="x", pady=1)
+                tk.Label(r1, text="Nom").pack(side="left")
+                nv = tk.StringVar(value=s.get("name", ""))
+                tk.Entry(r1, textvariable=nv, width=16).pack(side="left", padx=4)
+                tk.Label(r1, text="Desc").pack(side="left")
+                dv = tk.StringVar(value=s.get("desc", ""))
+                tk.Entry(r1, textvariable=dv, width=20).pack(side="left", padx=4)
+                tk.Label(r1, text="Cooldown (j)").pack(side="left", padx=(8, 0))
+                cd = tk.StringVar(value=s.get("cooldown", ""))
+                tk.Entry(r1, textvariable=cd, width=6).pack(side="left", padx=2)
 
-                row2 = ttk.Frame(lf)
-                row2.pack(fill="x", pady=1)
-                tk.Label(row2, text="TT1").pack(side="left")
-                t1 = tk.StringVar()
-                tk.Entry(row2, textvariable=t1, width=14).pack(side="left", padx=2)
-                tk.Label(row2, text="TT2").pack(side="left")
-                t2 = tk.StringVar()
-                tk.Entry(row2, textvariable=t2, width=14).pack(side="left", padx=2)
-                tk.Label(row2, text="Cooldown (jours)").pack(side="left", padx=(8, 0))
-                cd = tk.StringVar()
-                tk.Entry(row2, textvariable=cd, width=6).pack(side="left", padx=2)
+                pos_tts = make_tt_list(lf, "possible :", s.get("possible_tts", [""]))
+                eff_tts = make_tt_list(lf, "effect :",   s.get("effect_tts",   [""]))
 
-                if i - 1 < len(saved):
-                    s = saved[i - 1]
-                    nv.set(s["name"]); dv.set(s["desc"])
-                    t1.set(s["tt1"]);  t2.set(s["tt2"]); cd.set(s["cooldown"])
-
-                features_data["buttons"]["rows"].append({"name": nv, "desc": dv, "tt1": t1, "tt2": t2, "cooldown": cd})
+                features_data["buttons"]["rows"].append(
+                    {"name": nv, "desc": dv, "cooldown": cd,
+                     "possible_tts": pos_tts, "effect_tts": eff_tts}
+                )
 
         tk.Spinbox(parent, from_=1, to=10, textvariable=num_var,
                    width=4, command=refresh_buttons).pack(anchor="w")
@@ -458,11 +500,11 @@ def build_create_tab(notebook, path_var, tag_var):
             num_buttons = features_data["buttons"]["num"].get() if features_data["buttons"]["num"] else 0
             for r in features_data["buttons"]["rows"]:
                 buttons_data.append({
-                    "name":     r["name"].get(),
-                    "desc":     r["desc"].get(),
-                    "tt1":      r["tt1"].get() or "Nothing",
-                    "tt2":      r["tt2"].get() or "Nothing",
-                    "cooldown": r["cooldown"].get().strip() or None,
+                    "name":         r["name"].get(),
+                    "desc":         r["desc"].get(),
+                    "cooldown":     r["cooldown"].get().strip() or None,
+                    "possible_tts": r["possible_tts"]["get"]() or ["Nothing"],
+                    "effect_tts":   r["effect_tts"]["get"]()   or ["Nothing"],
                 })
 
         # ---- status_desc ----
