@@ -224,7 +224,7 @@ def parse_je_data(je_path, loc_path, btn_path, pb_path, key):
     for bk in btn_keys:
         sb = re.escape(bk)
         bd = {
-            "name": "", "desc": "", "cooldown": "",
+            "name": "", "desc": "", "cooldown": "", "cooldown_unit": "days",
             "possible_tts": [], "effect_tts": [],
             "possible_modified": False, "possible_raw": None,
             "possible_existing_tt_count": 0,
@@ -275,9 +275,10 @@ def parse_je_data(je_path, loc_path, btn_path, pb_path, key):
             bb = extract_named_block(btn_content, bk)
             if bb:
                 # Cooldown
-                cd = re.search(r'cooldown\s*=\s*\{[^}]*days\s*=\s*(\d+)', bb)
+                cd = re.search(r'cooldown\s*=\s*\{\s*(days|months|years)\s*=\s*(\d+)', bb)
                 if cd:
-                    bd["cooldown"] = cd.group(1)
+                    bd["cooldown_unit"] = cd.group(1)
+                    bd["cooldown"]      = cd.group(2)
 
                 # Détection de modification manuelle dans le bloc possible
                 possible_raw = extract_named_block(bb, "possible")
@@ -624,6 +625,7 @@ def build_manage_tab(parent, path_var, tag_var):
                 {"name":                       r["name"].get(),
                  "desc":                       r["desc"].get(),
                  "cooldown":                   r["cooldown"].get(),
+                 "cooldown_unit":              r["cooldown_unit"].get(),
                  "possible_tts":               r["possible_tts"]["get"](),
                  "effect_tts":                 r["effect_tts"]["get"](),
                  "possible_modified":          r.get("possible_modified", False),
@@ -653,9 +655,11 @@ def build_manage_tab(parent, path_var, tag_var):
                 ttk.Label(r1, text="Desc").pack(side="left")
                 dv = tk.StringVar(value=s.get("desc", ""))
                 ttk.Entry(r1, textvariable=dv, width=20).pack(side="left", padx=4)
-                ttk.Label(r1, text="Cooldown (j)").pack(side="left", padx=(8, 0))
+                ttk.Label(r1, text="Cooldown").pack(side="left", padx=(8, 0))
                 cd = tk.StringVar(value=s.get("cooldown", ""))
                 ttk.Entry(r1, textvariable=cd, width=6).pack(side="left", padx=2)
+                cu = tk.StringVar(value=s.get("cooldown_unit", "days"))
+                ttk.OptionMenu(r1, cu, cu.get(), "days", "months", "years").pack(side="left", padx=2)
 
                 pos_tts = make_tt_list(lf, "possible :", s.get("possible_tts", [""]))
                 eff_tts = make_tt_list(lf, "effect :",   s.get("effect_tts",   [""]))
@@ -681,7 +685,7 @@ def build_manage_tab(parent, path_var, tag_var):
                                   foreground="orange").pack(anchor="w", pady=1)
 
                 features_data["buttons"]["rows"].append({
-                    "name": nv, "desc": dv, "cooldown": cd,
+                    "name": nv, "desc": dv, "cooldown": cd, "cooldown_unit": cu,
                     "possible_tts":               pos_tts,
                     "effect_tts":                 eff_tts,
                     "possible_modified":           pmod,
@@ -956,7 +960,7 @@ def build_manage_tab(parent, path_var, tag_var):
                                       foreground="orange").pack(anchor="w", pady=1)
 
                     features_data["buttons"]["rows"].append({
-                        "name": nv, "desc": dv, "cooldown": cd,
+                        "name": nv, "desc": dv, "cooldown": cd, "cooldown_unit": cu,
                         "possible_tts":               pos_tts,
                         "effect_tts":                 eff_tts,
                         "possible_modified":           pmod,
@@ -1076,6 +1080,7 @@ def build_manage_tab(parent, path_var, tag_var):
                     "name":                       r["name"].get(),
                     "desc":                       r["desc"].get(),
                     "cooldown":                   r["cooldown"].get().strip() or None,
+                    "cooldown_unit":              r["cooldown_unit"].get(),
                     "possible_tts":               r["possible_tts"]["get"]() or ["Nothing"],
                     "effect_tts":                 r["effect_tts"]["get"]()   or ["Nothing"],
                     "possible_modified":          r.get("possible_modified", False),

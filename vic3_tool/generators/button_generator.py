@@ -6,8 +6,9 @@ def generate_buttons(je, buttons_data):
 
         cooldown_block = ""
         if btn_data.get("cooldown"):
+            unit = btn_data.get("cooldown_unit") or "days"
             cooldown_block = f"""
-    cooldown = {{ days = {btn_data['cooldown']} }}
+    cooldown = {{ {unit} = {btn_data['cooldown']} }}
 """
 
         # ── possible block ──────────────────────────────────────────

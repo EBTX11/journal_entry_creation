@@ -174,11 +174,12 @@ def build_create_tab(notebook, path_var, tag_var):
 
         def refresh_buttons(*_):
             saved = [
-                {"name":         r["name"].get(),
-                 "desc":         r["desc"].get(),
-                 "cooldown":     r["cooldown"].get(),
-                 "possible_tts": r["possible_tts"]["get"](),
-                 "effect_tts":   r["effect_tts"]["get"]()}
+                {"name":          r["name"].get(),
+                 "desc":          r["desc"].get(),
+                 "cooldown":      r["cooldown"].get(),
+                 "cooldown_unit": r["cooldown_unit"].get(),
+                 "possible_tts":  r["possible_tts"]["get"](),
+                 "effect_tts":    r["effect_tts"]["get"]()}
                 for r in features_data["buttons"]["rows"]
             ]
             for w in btn_rows_frame.winfo_children():
@@ -196,15 +197,17 @@ def build_create_tab(notebook, path_var, tag_var):
                 tk.Label(r1, text="Desc").pack(side="left")
                 dv = tk.StringVar(value=s.get("desc", ""))
                 tk.Entry(r1, textvariable=dv, width=20).pack(side="left", padx=4)
-                tk.Label(r1, text="Cooldown (j)").pack(side="left", padx=(8, 0))
+                tk.Label(r1, text="Cooldown").pack(side="left", padx=(8, 0))
                 cd = tk.StringVar(value=s.get("cooldown", ""))
                 tk.Entry(r1, textvariable=cd, width=6).pack(side="left", padx=2)
+                cu = tk.StringVar(value=s.get("cooldown_unit", "days"))
+                tk.OptionMenu(r1, cu, "days", "months", "years").pack(side="left", padx=2)
 
                 pos_tts = make_tt_list(lf, "possible :", s.get("possible_tts", [""]))
                 eff_tts = make_tt_list(lf, "effect :",   s.get("effect_tts",   [""]))
 
                 features_data["buttons"]["rows"].append(
-                    {"name": nv, "desc": dv, "cooldown": cd,
+                    {"name": nv, "desc": dv, "cooldown": cd, "cooldown_unit": cu,
                      "possible_tts": pos_tts, "effect_tts": eff_tts}
                 )
 
@@ -502,7 +505,8 @@ def build_create_tab(notebook, path_var, tag_var):
                 buttons_data.append({
                     "name":         r["name"].get(),
                     "desc":         r["desc"].get(),
-                    "cooldown":     r["cooldown"].get().strip() or None,
+                    "cooldown":      r["cooldown"].get().strip() or None,
+                    "cooldown_unit": r["cooldown_unit"].get(),
                     "possible_tts": r["possible_tts"]["get"]() or ["Nothing"],
                     "effect_tts":   r["effect_tts"]["get"]()   or ["Nothing"],
                 })
