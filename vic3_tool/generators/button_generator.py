@@ -44,12 +44,17 @@ def generate_buttons(je, buttons_data):
         )
         effect_block = f"    effect = {{\n{effect_tt_lines}\n    }}"
 
+        # ── visible block ───────────────────────────────────────────
+        if btn_data.get("visible_modified") and btn_data.get("visible_raw") is not None:
+            visible_block = f"    visible = {{{btn_data['visible_raw']}}}"
+        else:
+            visible_block = "    visible = {\n    }"
+
         content += f"""{btn} = {{
     name = "{btn}"
     desc = "{btn}_desc"
 
-    visible = {{
-    }}
+{visible_block}
 
 {possible_block}
 {cooldown_block}

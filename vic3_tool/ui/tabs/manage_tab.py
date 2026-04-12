@@ -228,6 +228,7 @@ def parse_je_data(je_path, loc_path, btn_path, pb_path, key):
             "possible_tts": [], "effect_tts": [],
             "possible_modified": False, "possible_raw": None,
             "possible_existing_tt_count": 0,
+            "visible_modified": False, "visible_raw": None,
         }
 
         # Nom / Desc
@@ -291,8 +292,23 @@ def parse_je_data(je_path, loc_path, btn_path, pb_path, key):
                         bd["possible_modified"] = True
                         bd["possible_raw"] = possible_raw
 
-        # Nombre de TT qui existent déjà dans le bloc possible (référence pour les ajouts futurs)
-        bd["possible_existing_tt_count"] = len(bd["possible_tts"])
+                    # Compter les TT STANDARDS déjà présents dans possible_raw
+                    # (nouveau format _tt_possible_N + ancien _tt_1/_tt_2)
+                    raw_count = len(re.findall(
+                        rf'{re.escape(bk)}_tt_possible_\d+', possible_raw
+                    ))
+                    if raw_count == 0:
+                        raw_count = len(re.findall(
+                            rf'{re.escape(bk)}_tt_\d+\b', possible_raw
+                        ))
+                    bd["possible_existing_tt_count"] = raw_count
+
+                # Détection de modification manuelle dans le bloc visible
+                visible_raw = extract_named_block(bb, "visible")
+                if visible_raw is not None and visible_raw.strip():
+                    bd["visible_modified"] = True
+                    bd["visible_raw"] = visible_raw
+
         data["buttons"].append(bd)
 
     # Progress bars
@@ -570,14 +586,16 @@ def build_manage_tab(parent, path_var, tag_var):
 
         def refresh_buttons(*_):
             saved = [
-                {"name":                      r["name"].get(),
-                 "desc":                      r["desc"].get(),
-                 "cooldown":                  r["cooldown"].get(),
-                 "possible_tts":              r["possible_tts"]["get"](),
-                 "effect_tts":                r["effect_tts"]["get"](),
-                 "possible_modified":         r.get("possible_modified", False),
-                 "possible_raw":              r.get("possible_raw", None),
-                 "possible_existing_tt_count": r.get("possible_existing_tt_count", 0)}
+                {"name":                       r["name"].get(),
+                 "desc":                       r["desc"].get(),
+                 "cooldown":                   r["cooldown"].get(),
+                 "possible_tts":               r["possible_tts"]["get"](),
+                 "effect_tts":                 r["effect_tts"]["get"](),
+                 "possible_modified":          r.get("possible_modified", False),
+                 "possible_raw":               r.get("possible_raw", None),
+                 "possible_existing_tt_count": r.get("possible_existing_tt_count", 0),
+                 "visible_modified":           r.get("visible_modified", False),
+                 "visible_raw":                r.get("visible_raw", None)}
                 for r in features_data["buttons"]["rows"]
             ]
             for w in btn_rows_frame.winfo_children():
@@ -604,12 +622,18 @@ def build_manage_tab(parent, path_var, tag_var):
 
                 pmod = s.get("possible_modified", False)
                 praw = s.get("possible_raw", None)
+                petc = s.get("possible_existing_tt_count", 0)
+                vmod = s.get("visible_modified", False)
+                vraw = s.get("visible_raw", None)
                 if pmod:
                     ttk.Label(lf,
                               text="⚠ possible modifié manuellement — non écrasé à la sauvegarde",
                               foreground="orange").pack(anchor="w", pady=1)
+                if vmod:
+                    ttk.Label(lf,
+                              text="⚠ visible modifié manuellement — non écrasé à la sauvegarde",
+                              foreground="orange").pack(anchor="w", pady=1)
 
-                petc = s.get("possible_existing_tt_count", 0)
                 features_data["buttons"]["rows"].append({
                     "name": nv, "desc": dv, "cooldown": cd,
                     "possible_tts":               pos_tts,
@@ -617,6 +641,8 @@ def build_manage_tab(parent, path_var, tag_var):
                     "possible_modified":           pmod,
                     "possible_raw":               praw,
                     "possible_existing_tt_count": petc,
+                    "visible_modified":            vmod,
+                    "visible_raw":                vraw,
                 })
 
         ttk.Spinbox(parent, from_=1, to=10, textvariable=num_var,
@@ -861,9 +887,15 @@ def build_manage_tab(parent, path_var, tag_var):
                     pmod = bd.get("possible_modified", False)
                     praw = bd.get("possible_raw", None)
                     petc = bd.get("possible_existing_tt_count", 0)
+                    vmod = bd.get("visible_modified", False)
+                    vraw = bd.get("visible_raw", None)
                     if pmod:
                         ttk.Label(lf,
                                   text="⚠ possible modifié manuellement — non écrasé à la sauvegarde",
+                                  foreground="orange").pack(anchor="w", pady=1)
+                    if vmod:
+                        ttk.Label(lf,
+                                  text="⚠ visible modifié manuellement — non écrasé à la sauvegarde",
                                   foreground="orange").pack(anchor="w", pady=1)
 
                     features_data["buttons"]["rows"].append({
@@ -873,6 +905,8 @@ def build_manage_tab(parent, path_var, tag_var):
                         "possible_modified":           pmod,
                         "possible_raw":               praw,
                         "possible_existing_tt_count": petc,
+                        "visible_modified":            vmod,
+                        "visible_raw":                vraw,
                     })
 
             _refresh_with_data()
@@ -985,6 +1019,8 @@ def build_manage_tab(parent, path_var, tag_var):
                     "possible_modified":          r.get("possible_modified", False),
                     "possible_raw":               r.get("possible_raw", None),
                     "possible_existing_tt_count": r.get("possible_existing_tt_count", 0),
+                    "visible_modified":           r.get("visible_modified", False),
+                    "visible_raw":                r.get("visible_raw", None),
                 })
 
         # ── Status desc ──
