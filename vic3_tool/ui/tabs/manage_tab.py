@@ -524,6 +524,10 @@ def build_manage_tab(parent, path_var, tag_var):
     desc_text = tk.Text(base, height=3, width=40)
     desc_text.grid(row=2, column=1, sticky="w", padx=6, pady=2)
 
+    tk.Button(base, text="Sauvegarder infos de base",
+              command=lambda: save_infos(),
+              bg="#2196F3", fg="white", padx=6).grid(row=3, column=1, sticky="w", padx=6, pady=4)
+
     mode_notebook = ttk.Notebook(form)
     mode_notebook.pack(fill="both", expand=True, padx=8, pady=(0, 6))
 
@@ -590,6 +594,10 @@ def build_manage_tab(parent, path_var, tag_var):
     ]:
         tk.Radiobutton(row_pb3, text=lbl, variable=gp_pb_color, value=val).pack(side="left")
 
+    tk.Button(gp_frame, text="Sauvegarder Goal Value + Progress Bar",
+              command=lambda: save_goal_mode(),
+              bg="#4CAF50", fg="white", padx=6).pack(anchor="w", pady=(12, 4))
+
     # ── features_data ──────────────────────────────────────
     features_data = {
         "is_shown":      {"enabled": tk.BooleanVar(value=False), "rows": [], "dlc": None, "_add_row": None, "_rows_frame": None},
@@ -622,6 +630,9 @@ def build_manage_tab(parent, path_var, tag_var):
         tk.Checkbutton(row_frame, text=feat_label,
                        variable=enabled_var, anchor="w").pack(side="left")
         build_config_fn(config_frame, feat_key)
+        tk.Button(config_frame, text="Sauvegarder cette section",
+                  command=lambda k=feat_key: save_section(k),
+                  bg="#4CAF50", fg="white", padx=6).pack(anchor="w", pady=(6, 2))
 
     # ── BUILDER GÉNÉRIQUE CONDITIONS ───────────────────────
     def build_condition_rows(parent, feat_key):
@@ -902,6 +913,408 @@ def build_manage_tab(parent, path_var, tag_var):
         ttk.Label(parent, text="Sera généré avec accolades vides.",
                   foreground="gray").pack(anchor="w")
 
+    # ── Sauvegarde chirurgicale Goal Value + Progress Bar ────────────
+    def save_goal_mode():
+        key = current_key_var.get()
+        if not key:
+            messagebox.showerror("Erreur", "Aucune JE chargée.")
+            return
+        _tag  = tag_var.get().upper()
+        _base = path_var.get()
+        _je_path  = os.path.join(_base, "common/journal_entries", f"{_tag}.txt")
+        _loc_path = os.path.join(_base, "localization/english",
+                                 "01_hmmf_je_localization_l_english.yml")
+        _pb_path  = os.path.join(_base, "common/scripted_progress_bars", "hmmf_progressbar.txt")
+        _year  = year_var.get().strip()
+        _title = title_var.get().strip()
+        _desc  = desc_text.get("1.0", "end").strip()
+
+        global_var = gp_global_var.get().strip()
+        goal_value = gp_goal_value.get().strip()
+        pb_name    = gp_pb_name.get().strip()
+        pb_desc    = gp_pb_desc.get().strip()
+        pb_max     = gp_pb_max.get().strip()
+        pb_color   = gp_pb_color.get()
+        pulse      = gp_pulse.get()
+
+        if not global_var or not goal_value or not pb_max:
+            messagebox.showerror("Erreur",
+                                 "Variable globale, Goal value et Max value sont obligatoires.")
+            return
+
+        pb_key   = f"{key}_1_progress_bar"
+        safe_key = re.escape(key)
+
+        try:
+            je_content = read_file(_je_path)
+            br = find_block_range(je_content, key)
+            if not br:
+                messagebox.showerror(
+                    "Erreur",
+                    "JE introuvable dans le fichier.\n"
+                    "Utilisez 'Créer / Régénérer la JE' pour la créer d'abord."
+                )
+                return
+
+            je_block = je_content[br[0]:br[1]]
+
+            # current_value
+            je_block = patch_named_block_in(
+                je_block, "current_value",
+                f"    current_value = {{\n        value = global_var:{global_var}\n    }}"
+            )
+            # goal_add_value
+            je_block = patch_named_block_in(
+                je_block, "goal_add_value",
+                f"    goal_add_value = {{\n        value = {goal_value}\n    }}"
+            )
+            # scripted_progress_bar (ligne)
+            je_block = re.sub(
+                rf'[ \t]*scripted_progress_bar\s*=\s*{safe_key}_\d+_progress_bar[ \t]*\n?',
+                '', je_block)
+            lb = je_block.rfind('}')
+            je_block = je_block[:lb] + f"    scripted_progress_bar = {pb_key}\n" + je_block[lb:]
+
+            # Bloc pulse (monthly ou yearly) — génère le bon et supprime l'autre
+            def _pulse_snip(pulse_name):
+                return (
+                    f"    on_{pulse_name}_pulse = {{\n"
+                    f"        effect = {{\n"
+                    f"            scope:journal_entry ?= {{\n"
+                    f"                if = {{\n"
+                    f"                    limit = {{\n"
+                    f"                    }}\n"
+                    f"                    change_global_variable = {{\n"
+                    f"                        name = {global_var}\n"
+                    f"                        add = 1\n"
+                    f"                    }}\n"
+                    f"                }}\n"
+                    f"            }}\n"
+                    f"            je:{key} ?= {{\n"
+                    f"                set_bar_progress = {{\n"
+                    f"                    value = global_var:{global_var}\n"
+                    f"                    name = {pb_key}\n"
+                    f"                }}\n"
+                    f"            }}\n"
+                    f"        }}\n"
+                    f"    }}"
+                )
+
+            other_pulse = "yearly" if pulse == "monthly" else "monthly"
+            je_block = patch_named_block_in(je_block, f"on_{pulse}_pulse", _pulse_snip(pulse))
+            other_br = find_block_range(je_block, f"on_{other_pulse}_pulse")
+            if other_br:
+                je_block = je_block[:other_br[0]].rstrip() + "\n" + je_block[other_br[1]:]
+
+            # Écriture JE
+            je_content = je_content[:br[0]] + je_block + je_content[br[1]:]
+            with open(_je_path, "w", encoding="utf-8") as f:
+                f.write(je_content)
+
+            # PB file
+            pb_data = {
+                "key": pb_key, "name": pb_name, "desc": pb_desc, "color": pb_color,
+                "start": "0", "min": "0", "max": pb_max,
+                "is_inverted": False, "second_desc": False,
+                "monthly_value": None, "monthly_desc": None,
+            }
+            pb_content = read_file(_pb_path) if os.path.exists(_pb_path) else ""
+            pb_content = remove_blocks_for_key(pb_content, f"{key}_")
+            pb_content = pb_content.rstrip() + "\n" + generate_progress_bar(pb_data)
+            with open(_pb_path, "w", encoding="utf-8") as f:
+                f.write(pb_content)
+
+            # Loc : titre/desc + entrées PB uniquement
+            _safe = re.escape(key)
+            loc_content = read_file(_loc_path) if os.path.exists(_loc_path) else "l_english:\n"
+            loc_content = re.sub(rf'[ \t]*{_safe}:0[^\n]*\n',                '', loc_content)
+            loc_content = re.sub(rf'[ \t]*{_safe}_reason:0[^\n]*\n',         '', loc_content)
+            loc_content = re.sub(rf'[ \t]*{_safe}_\d+_progress_bar[^\n]*\n', '', loc_content)
+            loc_content = loc_content.rstrip() + '\n\n'
+            loc_content += f'  {key}:0 "{_title}"\n'
+            loc_content += f'  {key}_reason:0 "{format_text(_desc)}"\n'
+            loc_content += f'  {pb_key}:0 "{pb_name}"\n'
+            loc_content += f'  {pb_key}_desc:0 "{pb_desc}"\n'
+            with open(_loc_path, "w", encoding="utf-8") as f:
+                f.write(loc_content)
+
+            messagebox.showinfo("Succès", "Goal Value + Progress Bar sauvegardé !")
+
+        except Exception as e:
+            messagebox.showerror("Erreur", f"{type(e).__name__}: {e!s}")
+
+    # ── Helpers collecte conditions (partagés save_section / on_save) ──
+    def apply_indent(cond, base):
+        return "\n".join(base + line for line in cond.split("\n"))
+
+    def collect_conditions(feat_key, base="        ", inner="            "):
+        standalone, and_group, or_group = [], [], []
+        for r in features_data[feat_key]["rows"]:
+            tmpl, _ = CONDITION_MAP[r["type"].get()]
+            try:
+                raw = tmpl.format(v1=r["v1"].get().strip(), v2=r["v2"].get().strip())
+            except KeyError:
+                raw = tmpl.format(v1=r["v1"].get().strip())
+            cond = f"NOT = {{ {raw} }}" if r["not"].get() else raw
+            if r["and"].get():
+                and_group.append(apply_indent(cond, inner))
+            elif r["or"].get():
+                or_group.append(apply_indent(cond, inner))
+            else:
+                standalone.append(apply_indent(cond, base))
+        if and_group:
+            standalone.append(f"{base}AND = {{\n" + "\n".join(and_group) + f"\n{base}}}")
+        if or_group:
+            standalone.append(f"{base}OR = {{\n" + "\n".join(or_group) + f"\n{base}}}")
+        return standalone
+
+    # ── Sauvegarde des infos de base (titre / desc / année) ──────────
+    def save_infos():
+        key = current_key_var.get()
+        if not key:
+            messagebox.showerror("Erreur", "Aucune JE chargée.")
+            return
+        _tag  = tag_var.get().upper()
+        _base = path_var.get()
+        _je_path  = os.path.join(_base, "common/journal_entries", f"{_tag}.txt")
+        _loc_path = os.path.join(_base, "localization/english",
+                                 "01_hmmf_je_localization_l_english.yml")
+        _year  = year_var.get().strip()
+        _title = title_var.get().strip()
+        _desc  = desc_text.get("1.0", "end").strip()
+        try:
+            je_content = read_file(_je_path)
+            br = find_block_range(je_content, key)
+            if br:
+                je_block = je_content[br[0]:br[1]]
+                je_block = re.sub(r'(game_date\s*>=\s*)\d+', rf'\g<1>{_year}', je_block)
+                je_content = je_content[:br[0]] + je_block + je_content[br[1]:]
+                with open(_je_path, "w", encoding="utf-8") as f:
+                    f.write(je_content)
+            loc_content = read_file(_loc_path) if os.path.exists(_loc_path) else "l_english:\n"
+            _safe = re.escape(key)
+            loc_content = re.sub(rf'[ \t]*{_safe}:0[^\n]*\n',        '', loc_content)
+            loc_content = re.sub(rf'[ \t]*{_safe}_reason:0[^\n]*\n', '', loc_content)
+            loc_content = loc_content.rstrip() + '\n\n'
+            loc_content += f'  {key}:0 "{_title}"\n'
+            loc_content += f'  {key}_reason:0 "{format_text(_desc)}"\n'
+            with open(_loc_path, "w", encoding="utf-8") as f:
+                f.write(loc_content)
+            messagebox.showinfo("Succès", "Infos de base sauvegardées !")
+        except Exception as e:
+            messagebox.showerror("Erreur", f"{type(e).__name__}: {e!s}")
+
+    # ── Sauvegarde chirurgicale d'une seule section ───────────────────
+    def save_section(feat_key):
+        key = current_key_var.get()
+        if not key:
+            messagebox.showerror("Erreur", "Aucune JE chargée.")
+            return
+        _tag  = tag_var.get().upper()
+        _base = path_var.get()
+        _je_path  = os.path.join(_base, "common/journal_entries", f"{_tag}.txt")
+        _loc_path = os.path.join(_base, "localization/english",
+                                 "01_hmmf_je_localization_l_english.yml")
+        _btn_path = os.path.join(_base, "common/scripted_buttons", f"{_tag}.txt")
+        _pb_path  = os.path.join(_base, "common/scripted_progress_bars", "hmmf_progressbar.txt")
+        _year  = year_var.get().strip()
+        _title = title_var.get().strip()
+        _desc  = desc_text.get("1.0", "end").strip()
+        try:
+            je_content = read_file(_je_path)
+            br = find_block_range(je_content, key)
+            if not br:
+                messagebox.showerror(
+                    "Erreur",
+                    "JE introuvable dans le fichier.\n"
+                    "Utilisez 'Créer / Régénérer la JE' pour la créer d'abord."
+                )
+                return
+            je_block = je_content[br[0]:br[1]]
+            safe_key = re.escape(key)
+            mm = re.match(r'(.+)_je_(\d+)', key)
+            je_tag   = mm.group(1) if mm else _tag
+            je_index = int(mm.group(2)) if mm else 1
+            je_obj   = JournalEntry(je_tag, je_index, _year, _title, _desc)
+
+            if feat_key == "is_shown":
+                cond = collect_conditions("is_shown")
+                dlc_v = features_data["is_shown"].get("dlc")
+                if dlc_v and dlc_v.get():
+                    cond.insert(0, f"        {dlc_v.get()} = yes")
+                cond_lines = "\n".join(cond) + "\n" if cond else ""
+                snippet = f"    is_shown_when_inactive = {{\n{cond_lines}    }}"
+                je_block = patch_named_block_in(je_block, "is_shown_when_inactive", snippet)
+
+            elif feat_key == "possible":
+                cond = collect_conditions("possible")
+                cond_lines = "\n".join(cond) + "\n" if cond else ""
+                snippet = f"    possible = {{\n        game_date >= {_year}.1.1\n{cond_lines}    }}"
+                je_block = patch_named_block_in(je_block, "possible", snippet)
+
+            elif feat_key == "complete":
+                cond = collect_conditions("complete")
+                cond_lines = "\n".join(cond) + "\n" if cond else ""
+                snippet = f"    complete = {{\n{cond_lines}    }}"
+                je_block = patch_named_block_in(je_block, "complete", snippet)
+
+            elif feat_key == "fail":
+                cond = collect_conditions("fail")
+                cond_lines = "\n".join(cond) + "\n" if cond else ""
+                snippet = f"    fail = {{\n{cond_lines}    }}"
+                je_block = patch_named_block_in(je_block, "fail", snippet)
+
+            elif feat_key == "buttons":
+                num_btn  = features_data["buttons"]["num"].get() or 0
+                btn_data = [{
+                    "name":                       r["name"].get(),
+                    "desc":                       r["desc"].get(),
+                    "cooldown":                   r["cooldown"].get().strip() or None,
+                    "cooldown_unit":              r["cooldown_unit"].get(),
+                    "possible_tts":               r["possible_tts"]["get"]() or ["Nothing"],
+                    "effect_tts":                 r["effect_tts"]["get"]()   or ["Nothing"],
+                    "possible_modified":          r.get("possible_modified", False),
+                    "possible_raw":               r.get("possible_raw", None),
+                    "possible_existing_tt_count": r.get("possible_existing_tt_count", 0),
+                    "visible_modified":           r.get("visible_modified", False),
+                    "visible_raw":                r.get("visible_raw", None),
+                    "effect_modified":            r.get("effect_modified", False),
+                    "effect_raw":                 r.get("effect_raw", None),
+                    "effect_existing_tt_count":   r.get("effect_existing_tt_count", 0),
+                    "ai_chance_modified":         r.get("ai_chance_modified", False),
+                    "ai_chance_raw":              r.get("ai_chance_raw", None),
+                } for r in features_data["buttons"]["rows"]]
+                # JE : lignes scripted_button
+                je_block = re.sub(
+                    rf'[ \t]*scripted_button\s*=\s*{safe_key}_button_\d+[ \t]*\n?', '', je_block)
+                if num_btn:
+                    btn_lines = "".join(
+                        f"    scripted_button = {key}_button_{i}\n"
+                        for i in range(1, num_btn + 1))
+                    lb = je_block.rfind('}')
+                    je_block = je_block[:lb] + btn_lines + je_block[lb:]
+                # Fichier boutons
+                btn_c = read_file(_btn_path) if os.path.exists(_btn_path) else ""
+                btn_c = remove_blocks_for_key(btn_c, f"{key}_button_")
+                if btn_data:
+                    sep = "\n\n" if btn_c.strip() else ""
+                    btn_c = btn_c.rstrip() + sep + generate_buttons(je_obj, btn_data)
+                if btn_c.strip() or os.path.exists(_btn_path):
+                    with open(_btn_path, "w", encoding="utf-8") as f:
+                        f.write(btn_c)
+                # Loc
+                loc_c = read_file(_loc_path) if os.path.exists(_loc_path) else "l_english:\n"
+                _safe = re.escape(key)
+                loc_c = re.sub(rf'[ \t]*{_safe}_button_[^\n]*\n', '', loc_c)
+                for i, bd in enumerate(btn_data, start=1):
+                    bk = f"{key}_button_{i}"
+                    loc_c += f'  {bk}:0 "{bd.get("name", "")}"\n'
+                    loc_c += f'  {bk}_desc:0 "{bd.get("desc", "")}"\n'
+                    for j, tt in enumerate(bd.get("possible_tts") or ["Nothing"], start=1):
+                        loc_c += f'  {bk}_tt_possible_{j}:0 "{tt or "Nothing"}"\n'
+                    for j, tt in enumerate(bd.get("effect_tts") or ["Nothing"], start=1):
+                        loc_c += f'  {bk}_tt_effect_{j}:0 "{tt or "Nothing"}"\n'
+                with open(_loc_path, "w", encoding="utf-8") as f:
+                    f.write(loc_c)
+
+            elif feat_key == "status_desc":
+                sd_list = [r.get() for r in features_data["status_desc"]["rows"] if r.get().strip()]
+                entries = ""
+                for i, text in enumerate(sd_list, start=1):
+                    sk = f"{key}_status_desc_{i}"
+                    entries += (
+                        f"\n            triggered_desc = {{\n"
+                        f"                desc = {sk}\n"
+                        f"                trigger = {{\n"
+                        f"                }}\n"
+                        f"            }}\n"
+                    )
+                snippet = f"    status_desc = {{\n        first_valid = {{{entries}        }}\n    }}"
+                je_block = patch_named_block_in(je_block, "status_desc", snippet)
+                # Loc
+                loc_c = read_file(_loc_path) if os.path.exists(_loc_path) else "l_english:\n"
+                _safe = re.escape(key)
+                loc_c = re.sub(rf'[ \t]*{_safe}_status_desc_[^\n]*\n', '', loc_c)
+                for i, txt in enumerate(sd_list, start=1):
+                    loc_c += f'  {key}_status_desc_{i}:0 "{txt}"\n'
+                with open(_loc_path, "w", encoding="utf-8") as f:
+                    f.write(loc_c)
+
+            elif feat_key == "progress_bars":
+                pb_list = [{
+                    "pb_index":    r["pb_index"],
+                    "key":         f"{key}_{r['pb_index']}_progress_bar",
+                    "name":        r["name"].get(),
+                    "desc":        r["desc"].get(),
+                    "color":       r["color"].get(),
+                    "start":       r["start"].get(),
+                    "min":         r["min"].get(),
+                    "max":         r["max"].get(),
+                    "is_inverted": r["is_inverted"].get(),
+                    "second_desc": r["second_desc"].get(),
+                    "monthly_value": r["monthly_value"].get().strip() or None,
+                    "monthly_desc":  r["monthly_desc"].get().strip() or None,
+                } for r in features_data["progress_bars"]["rows"]]
+                # JE : lignes scripted_progress_bar
+                je_block = re.sub(
+                    rf'[ \t]*scripted_progress_bar\s*=\s*{safe_key}_\d+_progress_bar[ \t]*\n?',
+                    '', je_block)
+                if pb_list:
+                    pb_lines = "".join(
+                        f"    scripted_progress_bar = {pb['key']}\n" for pb in pb_list)
+                    lb = je_block.rfind('}')
+                    je_block = je_block[:lb] + pb_lines + je_block[lb:]
+                    monthly_inner = "".join(
+                        f"\n            je:{key} ?= {{\n"
+                        f"                set_bar_progress = {{\n"
+                        f"                    value = 0\n"
+                        f"                    name = {pb['key']}\n"
+                        f"                }}\n"
+                        f"            }}\n"
+                        for pb in pb_list)
+                    monthly_snip = (
+                        f"    on_monthly_pulse = {{\n"
+                        f"        effect = {{{monthly_inner}"
+                        f"        }}\n"
+                        f"    }}")
+                    je_block = patch_named_block_in(je_block, "on_monthly_pulse", monthly_snip)
+                # Fichier PB
+                pb_c = read_file(_pb_path) if os.path.exists(_pb_path) else ""
+                pb_c = remove_blocks_for_key(pb_c, f"{key}_")
+                if pb_list:
+                    pb_c = pb_c.rstrip() + "\n"
+                    for pb in pb_list:
+                        pb_c += generate_progress_bar(pb)
+                if pb_c.strip() or os.path.exists(_pb_path):
+                    with open(_pb_path, "w", encoding="utf-8") as f:
+                        f.write(pb_c)
+                # Loc
+                loc_c = read_file(_loc_path) if os.path.exists(_loc_path) else "l_english:\n"
+                _safe = re.escape(key)
+                loc_c = re.sub(rf'[ \t]*{_safe}_\d+_progress_bar[^\n]*\n', '', loc_c)
+                for pb in pb_list:
+                    loc_c += f'  {pb["key"]}:0 "{pb["name"]}"\n'
+                    loc_c += f'  {pb["key"]}_desc:0 "{pb["desc"]}"\n'
+                with open(_loc_path, "w", encoding="utf-8") as f:
+                    f.write(loc_c)
+
+            elif feat_key == "monthly_empty":
+                snippet = "    on_monthly_pulse = {\n        effect = {\n        }\n    }"
+                je_block = patch_named_block_in(je_block, "on_monthly_pulse", snippet)
+
+            elif feat_key == "yearly":
+                snippet = "    on_yearly_pulse = {\n        effect = {\n        }\n    }"
+                je_block = patch_named_block_in(je_block, "on_yearly_pulse", snippet)
+
+            # Écriture JE
+            je_content = je_content[:br[0]] + je_block + je_content[br[1]:]
+            with open(_je_path, "w", encoding="utf-8") as f:
+                f.write(je_content)
+            messagebox.showinfo("Succès", "Section sauvegardée !")
+
+        except Exception as e:
+            messagebox.showerror("Erreur", f"{type(e).__name__}: {e!s}")
+
     # ── Assemblage du formulaire ────────────────────────────
     make_feature(scroll_frame, "is_shown",      "is_shown_when_inactive",        build_is_shown_config)
     make_feature(scroll_frame, "possible",      "possible (conditions supp.)",   build_possible_config)
@@ -914,8 +1327,8 @@ def build_manage_tab(parent, path_var, tag_var):
     make_feature(scroll_frame, "yearly",        "on_yearly_pulse (vide)",        build_empty)
 
     # ── Bouton sauvegarder ──────────────────────────────────
-    tk.Button(right, text="Sauvegarder la JE", command=lambda: on_save(),
-              bg="#2196F3", fg="white", font=("Arial", 11, "bold"),
+    tk.Button(right, text="Créer / Régénérer la JE complète", command=lambda: on_save(),
+              bg="#FF9800", fg="white", font=("Arial", 10, "bold"),
               pady=6).pack(pady=8)
 
     # ================================================================
@@ -1280,31 +1693,6 @@ def build_manage_tab(parent, path_var, tag_var):
             except Exception as e:
                 messagebox.showerror("Erreur", f"{type(e).__name__}: {e!s}")
             return
-
-        # ── Collecter conditions (helper inline) ──────────────
-        def apply_indent(cond, base):
-            return "\n".join(base + line for line in cond.split("\n"))
-
-        def collect_conditions(feat_key, base="        ", inner="            "):
-            standalone, and_group, or_group = [], [], []
-            for r in features_data[feat_key]["rows"]:
-                tmpl, _ = CONDITION_MAP[r["type"].get()]
-                try:
-                    raw = tmpl.format(v1=r["v1"].get().strip(), v2=r["v2"].get().strip())
-                except KeyError:
-                    raw = tmpl.format(v1=r["v1"].get().strip())
-                cond = f"NOT = {{ {raw} }}" if r["not"].get() else raw
-                if r["and"].get():
-                    and_group.append(apply_indent(cond, inner))
-                elif r["or"].get():
-                    or_group.append(apply_indent(cond, inner))
-                else:
-                    standalone.append(apply_indent(cond, base))
-            if and_group:
-                standalone.append(f"{base}AND = {{\n" + "\n".join(and_group) + f"\n{base}}}")
-            if or_group:
-                standalone.append(f"{base}OR = {{\n" + "\n".join(or_group) + f"\n{base}}}")
-            return standalone
 
         # ── is_shown ──
         is_shown_list = None
