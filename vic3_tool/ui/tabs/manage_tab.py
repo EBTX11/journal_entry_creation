@@ -57,25 +57,37 @@ def match_to_condition(line):
     line = line.strip()
     base = {"type": "Texte libre", "v1": line, "v2": "",
             "not": False, "and": False, "or": False}
-    for type_name, tmpl, fields in CONDITION_SPECS:
-        if type_name in ("Texte libre", "Pays Exist/This"):
-            continue
-        try:
-            pat = re.escape(
-                tmpl.replace("{v1}", "\x00V1\x00").replace("{v2}", "\x00V2\x00")
-            )
-            pat = (pat.replace(r"\x00V1\x00", r"(\S+)")
-                      .replace(r"\x00V2\x00", r"(\S+)")
-                      .replace(r"\{\{", r"\{")
-                      .replace(r"\}\}", r"\}"))
-            m = re.fullmatch(pat, line)
-            if m:
-                groups = m.groups()
-                return {**base, "type": type_name,
-                        "v1": groups[0] if groups else "",
-                        "v2": groups[1] if len(groups) > 1 else ""}
-        except re.error:
-            continue
+
+    W = r"[\w:]+"   # mot + deux-points (pour law_type:xxx etc.)
+    S = r"\S+"      # tout sauf espace
+
+    patterns = [
+        # (type_name,             regex,                                    g_v1, g_v2)
+        ("Pays existe",           rf"exists\s*=\s*c:({W})",                    1, None),
+        ("Est le pays (scope)",   rf"c:({W})\s*\?=\s*THIS",                    1, None),
+        ("Pays n'existe pas",     rf"NOT\s*=\s*\{{\s*exists\s*=\s*c:({W})\s*\}}", 1, None),
+        ("A la variable",         rf"has_variable\s*=\s*({S})",                1, None),
+        ("N'a pas la variable",   rf"NOT\s*=\s*\{{\s*has_variable\s*=\s*({S})\s*\}}", 1, None),
+        ("Pays a la variable",    rf"c:({W})\s*=\s*\{{\s*has_variable\s*=\s*({S})\s*\}}", 1, 2),
+        ("Loi active",            rf"has_law_or_variant\s*=\s*law_type:({S})", 1, None),
+        ("Loi non active",        rf"NOT\s*=\s*\{{\s*has_law_or_variant\s*=\s*law_type:({S})\s*\}}", 1, None),
+        ("Est humain",            r"is_ai\s*=\s*no",                           None, None),
+        ("Est IA",                r"is_ai\s*=\s*yes",                          None, None),
+        ("En guerre",             r"is_at_war\s*=\s*yes",                      None, None),
+        ("Pas en guerre",         r"is_at_war\s*=\s*no",                       None, None),
+        ("Objectif atteint",      r"is_goal_complete\s*=\s*yes",               None, None),
+        ("JE objectif atteint",   r"scope:journal_entry\s*=\s*\{\s*is_goal_complete\s*=\s*yes\s*\}", None, None),
+        ("Date >=",               r"game_date\s*>=\s*(\d+)(?:\.\d+\.\d+)?",   1, None),
+        ("Date <",                r"game_date\s*<\s*(\d+)(?:\.\d+\.\d+)?",    1, None),
+    ]
+
+    for type_name, pattern, g1, g2 in patterns:
+        m = re.fullmatch(pattern, line)
+        if m:
+            v1 = m.group(g1) if g1 else ""
+            v2 = m.group(g2) if g2 else ""
+            return {**base, "type": type_name, "v1": v1, "v2": v2}
+
     return base
 
 
