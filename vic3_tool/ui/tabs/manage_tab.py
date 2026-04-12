@@ -228,7 +228,10 @@ def parse_je_data(je_path, loc_path, btn_path, pb_path, key):
             "possible_tts": [], "effect_tts": [],
             "possible_modified": False, "possible_raw": None,
             "possible_existing_tt_count": 0,
-            "visible_modified": False, "visible_raw": None,
+            "visible_modified":  False, "visible_raw":  None,
+            "effect_modified":   False, "effect_raw":   None,
+            "effect_existing_tt_count": 0,
+            "ai_chance_modified": False, "ai_chance_raw": None,
         }
 
         # Nom / Desc
@@ -308,6 +311,38 @@ def parse_je_data(je_path, loc_path, btn_path, pb_path, key):
                 if visible_raw is not None and visible_raw.strip():
                     bd["visible_modified"] = True
                     bd["visible_raw"] = visible_raw
+
+                # Détection de modification manuelle dans le bloc effect
+                effect_raw = extract_named_block(bb, "effect")
+                if effect_raw is not None:
+                    raw_count = len(re.findall(
+                        rf'{re.escape(bk)}_tt_effect_\d+', effect_raw
+                    ))
+                    if raw_count == 0:
+                        raw_count = len(re.findall(
+                            rf'{re.escape(bk)}_tt_2\b', effect_raw
+                        ))
+                    bd["effect_existing_tt_count"] = raw_count
+
+                    cleaned_eff = re.sub(
+                        rf'custom_tooltip\s*=\s*\{{\s*text\s*=\s*{re.escape(bk)}_tt_effect_\d+\s*\}}',
+                        '', effect_raw
+                    )
+                    cleaned_eff = re.sub(
+                        rf'custom_tooltip\s*=\s*\{{\s*text\s*=\s*{re.escape(bk)}_tt_2\s*\}}',
+                        '', cleaned_eff
+                    )
+                    if cleaned_eff.strip():
+                        bd["effect_modified"] = True
+                        bd["effect_raw"] = effect_raw
+
+                # Détection de modification manuelle dans le bloc ai_chance
+                ai_raw = extract_named_block(bb, "ai_chance")
+                if ai_raw is not None:
+                    cleaned_ai = re.sub(r'value\s*=\s*10', '', ai_raw).strip()
+                    if cleaned_ai:
+                        bd["ai_chance_modified"] = True
+                        bd["ai_chance_raw"] = ai_raw
 
         data["buttons"].append(bd)
 
@@ -595,7 +630,12 @@ def build_manage_tab(parent, path_var, tag_var):
                  "possible_raw":               r.get("possible_raw", None),
                  "possible_existing_tt_count": r.get("possible_existing_tt_count", 0),
                  "visible_modified":           r.get("visible_modified", False),
-                 "visible_raw":                r.get("visible_raw", None)}
+                 "visible_raw":                r.get("visible_raw", None),
+                 "effect_modified":            r.get("effect_modified", False),
+                 "effect_raw":                 r.get("effect_raw", None),
+                 "effect_existing_tt_count":   r.get("effect_existing_tt_count", 0),
+                 "ai_chance_modified":         r.get("ai_chance_modified", False),
+                 "ai_chance_raw":              r.get("ai_chance_raw", None)}
                 for r in features_data["buttons"]["rows"]
             ]
             for w in btn_rows_frame.winfo_children():
@@ -625,14 +665,20 @@ def build_manage_tab(parent, path_var, tag_var):
                 petc = s.get("possible_existing_tt_count", 0)
                 vmod = s.get("visible_modified", False)
                 vraw = s.get("visible_raw", None)
-                if pmod:
-                    ttk.Label(lf,
-                              text="⚠ possible modifié manuellement — non écrasé à la sauvegarde",
-                              foreground="orange").pack(anchor="w", pady=1)
-                if vmod:
-                    ttk.Label(lf,
-                              text="⚠ visible modifié manuellement — non écrasé à la sauvegarde",
-                              foreground="orange").pack(anchor="w", pady=1)
+                emod = s.get("effect_modified", False)
+                eraw = s.get("effect_raw", None)
+                eetc = s.get("effect_existing_tt_count", 0)
+                amod = s.get("ai_chance_modified", False)
+                araw = s.get("ai_chance_raw", None)
+                for warn in [
+                    (pmod, "⚠ possible modifié manuellement — non écrasé à la sauvegarde"),
+                    (vmod, "⚠ visible modifié manuellement — non écrasé à la sauvegarde"),
+                    (emod, "⚠ effect modifié manuellement — non écrasé à la sauvegarde"),
+                    (amod, "⚠ ai_chance modifié manuellement — non écrasé à la sauvegarde"),
+                ]:
+                    if warn[0]:
+                        ttk.Label(lf, text=warn[1],
+                                  foreground="orange").pack(anchor="w", pady=1)
 
                 features_data["buttons"]["rows"].append({
                     "name": nv, "desc": dv, "cooldown": cd,
@@ -643,6 +689,11 @@ def build_manage_tab(parent, path_var, tag_var):
                     "possible_existing_tt_count": petc,
                     "visible_modified":            vmod,
                     "visible_raw":                vraw,
+                    "effect_modified":             emod,
+                    "effect_raw":                 eraw,
+                    "effect_existing_tt_count":   eetc,
+                    "ai_chance_modified":          amod,
+                    "ai_chance_raw":              araw,
                 })
 
         ttk.Spinbox(parent, from_=1, to=10, textvariable=num_var,
@@ -889,14 +940,20 @@ def build_manage_tab(parent, path_var, tag_var):
                     petc = bd.get("possible_existing_tt_count", 0)
                     vmod = bd.get("visible_modified", False)
                     vraw = bd.get("visible_raw", None)
-                    if pmod:
-                        ttk.Label(lf,
-                                  text="⚠ possible modifié manuellement — non écrasé à la sauvegarde",
-                                  foreground="orange").pack(anchor="w", pady=1)
-                    if vmod:
-                        ttk.Label(lf,
-                                  text="⚠ visible modifié manuellement — non écrasé à la sauvegarde",
-                                  foreground="orange").pack(anchor="w", pady=1)
+                    emod = bd.get("effect_modified", False)
+                    eraw = bd.get("effect_raw", None)
+                    eetc = bd.get("effect_existing_tt_count", 0)
+                    amod = bd.get("ai_chance_modified", False)
+                    araw = bd.get("ai_chance_raw", None)
+                    for warn in [
+                        (pmod, "⚠ possible modifié manuellement — non écrasé à la sauvegarde"),
+                        (vmod, "⚠ visible modifié manuellement — non écrasé à la sauvegarde"),
+                        (emod, "⚠ effect modifié manuellement — non écrasé à la sauvegarde"),
+                        (amod, "⚠ ai_chance modifié manuellement — non écrasé à la sauvegarde"),
+                    ]:
+                        if warn[0]:
+                            ttk.Label(lf, text=warn[1],
+                                      foreground="orange").pack(anchor="w", pady=1)
 
                     features_data["buttons"]["rows"].append({
                         "name": nv, "desc": dv, "cooldown": cd,
@@ -907,6 +964,11 @@ def build_manage_tab(parent, path_var, tag_var):
                         "possible_existing_tt_count": petc,
                         "visible_modified":            vmod,
                         "visible_raw":                vraw,
+                        "effect_modified":             emod,
+                        "effect_raw":                 eraw,
+                        "effect_existing_tt_count":   eetc,
+                        "ai_chance_modified":          amod,
+                        "ai_chance_raw":              araw,
                     })
 
             _refresh_with_data()
@@ -1021,6 +1083,11 @@ def build_manage_tab(parent, path_var, tag_var):
                     "possible_existing_tt_count": r.get("possible_existing_tt_count", 0),
                     "visible_modified":           r.get("visible_modified", False),
                     "visible_raw":                r.get("visible_raw", None),
+                    "effect_modified":            r.get("effect_modified", False),
+                    "effect_raw":                 r.get("effect_raw", None),
+                    "effect_existing_tt_count":   r.get("effect_existing_tt_count", 0),
+                    "ai_chance_modified":         r.get("ai_chance_modified", False),
+                    "ai_chance_raw":              r.get("ai_chance_raw", None),
                 })
 
         # ── Status desc ──

@@ -37,18 +37,40 @@ def generate_buttons(je, buttons_data):
             possible_block = f"    possible = {{\n{tt_lines}\n    }}"
 
         # ── effect block ────────────────────────────────────────────
-        effect_tts = btn_data.get("effect_tts") or ["Nothing"]
-        effect_tt_lines = "\n".join(
-            f"        custom_tooltip = {{\n            text = {btn}_tt_effect_{j}\n        }}"
-            for j in range(1, len(effect_tts) + 1)
-        )
-        effect_block = f"    effect = {{\n{effect_tt_lines}\n    }}"
+        if btn_data.get("effect_modified") and btn_data.get("effect_raw") is not None:
+            raw_inner      = btn_data["effect_raw"]
+            effect_tts     = btn_data.get("effect_tts") or []
+            existing_count = btn_data.get("effect_existing_tt_count", len(effect_tts))
+            new_tts        = effect_tts[existing_count:]
+
+            if new_tts:
+                start_num  = existing_count + 1
+                injections = "\n".join(
+                    f"        custom_tooltip = {{\n            text = {btn}_tt_effect_{start_num + j}\n        }}"
+                    for j in range(len(new_tts))
+                )
+                raw_inner = raw_inner.rstrip() + "\n" + injections + "\n    "
+
+            effect_block = f"    effect = {{{raw_inner}}}"
+        else:
+            effect_tts = btn_data.get("effect_tts") or ["Nothing"]
+            effect_tt_lines = "\n".join(
+                f"        custom_tooltip = {{\n            text = {btn}_tt_effect_{j}\n        }}"
+                for j in range(1, len(effect_tts) + 1)
+            )
+            effect_block = f"    effect = {{\n{effect_tt_lines}\n    }}"
 
         # ── visible block ───────────────────────────────────────────
         if btn_data.get("visible_modified") and btn_data.get("visible_raw") is not None:
             visible_block = f"    visible = {{{btn_data['visible_raw']}}}"
         else:
             visible_block = "    visible = {\n    }"
+
+        # ── ai_chance block ─────────────────────────────────────────
+        if btn_data.get("ai_chance_modified") and btn_data.get("ai_chance_raw") is not None:
+            ai_chance_block = f"    ai_chance = {{{btn_data['ai_chance_raw']}}}"
+        else:
+            ai_chance_block = "    ai_chance = {\n        value = 10\n    }"
 
         content += f"""{btn} = {{
     name = "{btn}"
@@ -60,9 +82,7 @@ def generate_buttons(je, buttons_data):
 {cooldown_block}
 {effect_block}
 
-    ai_chance = {{
-        value = 10
-    }}
+{ai_chance_block}
 }}
 
 """
