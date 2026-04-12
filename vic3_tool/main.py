@@ -2,7 +2,7 @@ import os
 import re
 
 from vic3_tool.models.journal_entry import JournalEntry
-from vic3_tool.generators.je_generator import generate_je_block
+from vic3_tool.generators.je_generator import generate_je_block, generate_je_goal_progress_block
 from vic3_tool.generators.button_generator import generate_buttons
 from vic3_tool.generators.localization_generator import generate_localization
 from vic3_tool.generators.progress_bar_generator import generate_progress_bar
@@ -85,3 +85,40 @@ def create_full_je(
     if progress_bars:
         for pb in progress_bars:
             append_to_file(pb_path, generate_progress_bar(pb))
+
+
+def create_je_goal_progress(
+    base_path, tag, year, title, desc,
+    global_var, goal_value,
+    pb_name, pb_desc, pb_color, pb_max_value,
+    pulse="monthly",
+):
+    je_path  = os.path.join(base_path, "common/journal_entries", f"{tag}.txt")
+    pb_path  = os.path.join(base_path, "common/scripted_progress_bars", "hmmf_progressbar.txt")
+    loc_path = os.path.join(base_path, "localization/english", "01_hmmf_je_localization_l_english.yml")
+
+    ensure_folder(os.path.dirname(je_path))
+    ensure_folder(os.path.dirname(pb_path))
+    ensure_folder(os.path.dirname(loc_path))
+
+    index  = get_next_je_index(tag, je_path)
+    je     = JournalEntry(tag, index, year, title, desc)
+    pb_key = f"{je.key}_1_progress_bar"
+
+    pb_data = {
+        "key":           pb_key,
+        "name":          pb_name,
+        "desc":          pb_desc,
+        "color":         pb_color,
+        "start":         "0",
+        "min":           "0",
+        "max":           pb_max_value,
+        "is_inverted":   False,
+        "second_desc":   False,
+        "monthly_value": None,
+        "monthly_desc":  None,
+    }
+
+    append_to_file(je_path,  "\n" + generate_je_goal_progress_block(je, global_var, pb_key, goal_value, pulse))
+    append_to_file(pb_path,  generate_progress_bar(pb_data))
+    append_to_file(loc_path, "\n" + generate_localization(je, [], [pb_data], None))

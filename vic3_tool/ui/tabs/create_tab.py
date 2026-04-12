@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-from vic3_tool.main import create_full_je
+from vic3_tool.main import create_full_je, create_je_goal_progress
 
 # (label, template_format, [champs])
 # Les accolades littérales dans le template sont doublées pour .format()
@@ -113,14 +113,21 @@ def build_create_tab(notebook, path_var, tag_var):
     desc_text.grid(row=2, column=1, sticky="w", padx=6, pady=3)
 
     # ============================================================
-    # PANNEAU FEATURES
+    # PANNEAU FEATURES — deux onglets
     # ============================================================
 
     feat_outer = ttk.LabelFrame(frame, text="Features")
     feat_outer.pack(fill="both", expand=True, padx=10, pady=4)
 
-    canvas = tk.Canvas(feat_outer, borderwidth=0, highlightthickness=0)
-    scrollbar = ttk.Scrollbar(feat_outer, orient="vertical", command=canvas.yview)
+    feat_notebook = ttk.Notebook(feat_outer)
+    feat_notebook.pack(fill="both", expand=True)
+
+    # ── Onglet 1 : Standard ───────────────────────────────────────────────────
+    tab_standard = ttk.Frame(feat_notebook)
+    feat_notebook.add(tab_standard, text="Standard")
+
+    canvas = tk.Canvas(tab_standard, borderwidth=0, highlightthickness=0)
+    scrollbar = ttk.Scrollbar(tab_standard, orient="vertical", command=canvas.yview)
     scroll_frame = ttk.Frame(canvas)
 
     scroll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
@@ -129,6 +136,67 @@ def build_create_tab(notebook, path_var, tag_var):
 
     canvas.pack(side="left", fill="both", expand=True)
     scrollbar.pack(side="right", fill="y")
+
+    # ── Onglet 2 : Goal Value + Progress Bar ──────────────────────────────────
+    tab_goal = ttk.Frame(feat_notebook)
+    feat_notebook.add(tab_goal, text="Goal Value + Progress Bar")
+
+    gp_frame = ttk.Frame(tab_goal)
+    gp_frame.pack(fill="x", padx=12, pady=8)
+
+    tk.Label(gp_frame, text="Schéma : progress bar pilotée par une variable globale,\n"
+             "la JE se complète quand current_value atteint goal_add_value.",
+             foreground="gray", justify="left").pack(anchor="w", pady=(0, 8))
+
+    # Variable globale
+    row_gv = ttk.Frame(gp_frame); row_gv.pack(fill="x", pady=3)
+    tk.Label(row_gv, text="Variable globale :", width=20, anchor="w").pack(side="left")
+    gp_global_var = tk.StringVar(value="variable_global_ici")
+    tk.Entry(row_gv, textvariable=gp_global_var, width=36).pack(side="left", padx=4)
+
+    # Goal value
+    row_goal = ttk.Frame(gp_frame); row_goal.pack(fill="x", pady=3)
+    tk.Label(row_goal, text="goal_add_value :", width=20, anchor="w").pack(side="left")
+    gp_goal_value = tk.StringVar(value="6")
+    tk.Entry(row_goal, textvariable=gp_goal_value, width=8).pack(side="left", padx=4)
+
+    # Pulse
+    row_pulse = ttk.Frame(gp_frame); row_pulse.pack(fill="x", pady=3)
+    tk.Label(row_pulse, text="Incrément dans :", width=20, anchor="w").pack(side="left")
+    gp_pulse = tk.StringVar(value="monthly")
+    tk.Radiobutton(row_pulse, text="on_monthly_pulse", variable=gp_pulse, value="monthly").pack(side="left")
+    tk.Radiobutton(row_pulse, text="on_yearly_pulse",  variable=gp_pulse, value="yearly").pack(side="left", padx=8)
+
+    ttk.Separator(gp_frame, orient="horizontal").pack(fill="x", pady=8)
+    tk.Label(gp_frame, text="Progress Bar", font=("", 10, "bold")).pack(anchor="w")
+
+    # Nom affiché / desc
+    row_pb1 = ttk.Frame(gp_frame); row_pb1.pack(fill="x", pady=3)
+    tk.Label(row_pb1, text="Nom affiché :", width=20, anchor="w").pack(side="left")
+    gp_pb_name = tk.StringVar()
+    tk.Entry(row_pb1, textvariable=gp_pb_name, width=28).pack(side="left", padx=4)
+    tk.Label(row_pb1, text="Desc :").pack(side="left")
+    gp_pb_desc = tk.StringVar()
+    tk.Entry(row_pb1, textvariable=gp_pb_desc, width=28).pack(side="left", padx=4)
+
+    # Max value
+    row_pb2 = ttk.Frame(gp_frame); row_pb2.pack(fill="x", pady=3)
+    tk.Label(row_pb2, text="Max value :", width=20, anchor="w").pack(side="left")
+    gp_pb_max = tk.StringVar(value="10")
+    tk.Entry(row_pb2, textvariable=gp_pb_max, width=8).pack(side="left", padx=4)
+
+    # Couleur
+    row_pb3 = ttk.Frame(gp_frame); row_pb3.pack(fill="x", pady=3)
+    tk.Label(row_pb3, text="Couleur :", width=20, anchor="w").pack(side="left")
+    gp_pb_color = tk.StringVar(value="default_green = yes")
+    for label, val in [
+        ("Vert",         "default_green = yes"),
+        ("Rouge",        "default_bad = yes"),
+        ("Neutre",       "default = yes"),
+        ("Or double",    "double_sided_gold = yes"),
+        ("Rouge double", "double_sided_bad = yes"),
+    ]:
+        tk.Radiobutton(row_pb3, text=label, variable=gp_pb_color, value=val).pack(side="left")
 
     # -------- initialisation features_data AVANT tout --------
     features_data = {
@@ -446,6 +514,32 @@ def build_create_tab(notebook, path_var, tag_var):
 
         if not base_path or not tag or not year or not title:
             messagebox.showerror("Erreur", "Dossier, TAG, Année et Titre sont obligatoires.")
+            return
+
+        # ── Onglet "Goal Value + Progress Bar" ───────────────────────────────
+        if feat_notebook.index(feat_notebook.select()) == 1:
+            global_var  = gp_global_var.get().strip()
+            goal_value  = gp_goal_value.get().strip()
+            pb_name     = gp_pb_name.get().strip()
+            pb_desc     = gp_pb_desc.get().strip()
+            pb_max      = gp_pb_max.get().strip()
+            pb_color    = gp_pb_color.get()
+            pulse       = gp_pulse.get()
+
+            if not global_var or not goal_value or not pb_max:
+                messagebox.showerror("Erreur", "Variable globale, Goal value et Max value sont obligatoires.")
+                return
+            try:
+                create_je_goal_progress(
+                    base_path=base_path, tag=tag, year=year, title=title, desc=desc,
+                    global_var=global_var, goal_value=goal_value,
+                    pb_name=pb_name, pb_desc=pb_desc,
+                    pb_color=pb_color, pb_max_value=pb_max,
+                    pulse=pulse,
+                )
+                messagebox.showinfo("Succès", "Journal Entry (Goal + Progress Bar) générée avec succès !")
+            except Exception as e:
+                messagebox.showerror("Erreur", str(e))
             return
 
         # ---- helpers conditions ----

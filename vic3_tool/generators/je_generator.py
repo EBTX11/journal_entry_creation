@@ -1,5 +1,69 @@
 import os
 
+
+def generate_je_goal_progress_block(je, global_var, pb_key, goal_value, pulse="monthly"):
+    """Génère un JE suivant le schéma 'progress bar pilotée par une variable globale'."""
+    return f"""{je.key} = {{
+    icon = "gfx/interface/icons/event_icons/{je.key}.dds"
+
+    group = je_group_ef
+    should_be_pinned_by_default = yes
+
+    is_shown_when_inactive = {{
+        exists = c:{je.tag}
+        c:{je.tag} ?= THIS
+    }}
+
+    possible = {{
+        game_date >= {je.year}.1.1
+    }}
+
+    immediate = {{
+    }}
+
+    complete = {{
+        scope:journal_entry = {{ is_goal_complete = yes }}
+    }}
+
+    fail = {{
+    }}
+
+    on_complete = {{
+    }}
+
+    scripted_progress_bar = {pb_key}
+
+    on_{pulse}_pulse = {{
+        effect = {{
+            scope:journal_entry ?= {{
+                if = {{
+                    limit = {{
+                    }}
+                    change_global_variable = {{
+                        name = {global_var}
+                        add = 1
+                    }}
+                }}
+            }}
+            je:{je.key} ?= {{
+                set_bar_progress = {{
+                    value = global_var:{global_var}
+                    name = {pb_key}
+                }}
+            }}
+        }}
+    }}
+
+    current_value = {{
+        value = global_var:{global_var}
+    }}
+    goal_add_value = {{
+        value = {goal_value}
+    }}
+}}
+"""
+
+
 TEMPLATE_PATH = os.path.join(
     os.path.dirname(__file__),
     "../templates/je_templates.txt"
