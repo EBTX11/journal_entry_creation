@@ -932,9 +932,11 @@ def build_manage_tab(parent, path_var, tag_var):
                     ttk.Label(r1, text="Desc").pack(side="left")
                     dv = tk.StringVar(value=bd.get("desc", ""))
                     ttk.Entry(r1, textvariable=dv, width=20).pack(side="left", padx=4)
-                    ttk.Label(r1, text="Cooldown (j)").pack(side="left", padx=(8, 0))
+                    ttk.Label(r1, text="Cooldown").pack(side="left", padx=(8, 0))
                     cd = tk.StringVar(value=bd.get("cooldown", ""))
                     ttk.Entry(r1, textvariable=cd, width=6).pack(side="left", padx=2)
+                    cu = tk.StringVar(value=bd.get("cooldown_unit", "days"))
+                    ttk.OptionMenu(r1, cu, cu.get(), "days", "months", "years").pack(side="left", padx=2)
 
                     pos_tts = make_tt_list(lf, "possible :", bd.get("possible_tts") or [""])
                     eff_tts = make_tt_list(lf, "effect :",   bd.get("effect_tts")   or [""])
