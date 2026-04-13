@@ -3,7 +3,8 @@
     "allow": [
       "Bash(grep -l \"scripted_progress_bar\" \"D:/SteamLibrary/steamapps/common/Victoria 3/game/common/journal_entries/\"*.txt)",
       "Read(//e/Games/Divers/Utilitaire de jeux/Mod victioria 3/Outils modding/hmmf/journal_entry_creation/**)",
-      "Bash(python -c \"from vic3_tool.ui.tabs.create_tab import make_tt_list; from vic3_tool.ui.tabs.manage_tab import build_manage_tab; print\\('imports OK'\\)\")"
+      "Bash(python -c \"from vic3_tool.ui.tabs.create_tab import make_tt_list; from vic3_tool.ui.tabs.manage_tab import build_manage_tab; print\\('imports OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('vic3_tool/ui/tabs/event_tab.py'\\).read\\(\\)\\)\")"
     ]
   }
 }
