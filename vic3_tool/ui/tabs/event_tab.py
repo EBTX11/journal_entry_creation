@@ -253,7 +253,8 @@ def build_event_tab(parent, path_var, tag_var):
             w.destroy()
         options_data.clear()
 
-    def add_option_widget(name="", is_default=False, tooltip_key="", tooltip_text=""):
+
+    def add_option_widget(name="", is_default=False, tooltip_text=""):
         """Ajoute un widget de configuration d'option"""
         row_frame = ttk.Frame(options_widgets_frame)
         row_frame.pack(fill="x", pady=2)
@@ -287,21 +288,27 @@ def build_event_tab(parent, path_var, tag_var):
         
         tk.Button(main_row, text="X", command=remove_this, width=2, fg="red").pack(side="right", padx=2)
         
-        # Sous-frame pour le tooltip (clé)
+
+        # Sous-frame pour le tooltip (description uniquement)
         tooltip_row = ttk.Frame(row_frame)
         tooltip_row.pack(fill="x", padx=(24, 0), pady=2)
         
-        tk.Label(tooltip_row, text="Tooltip clé:", width=10).pack(side="left")
-        tooltip_key_var = tk.StringVar(value=tooltip_key)
-        tk.Entry(tooltip_row, textvariable=tooltip_key_var, width=25).pack(side="left", padx=2)
-        tk.Label(tooltip_row, text="(auto: {key}_desc.a{N})", foreground="gray", font=("Arial", 8)).pack(side="left", padx=2)
-        
-        tk.Label(tooltip_row, text="Desc:", width=5).pack(side="left", padx=(10, 0))
-        tooltip_text_var = tk.StringVar(value=tooltip_text)
-        tk.Entry(tooltip_row, textvariable=tooltip_text_var, width=30).pack(side="left", fill="x", expand=True, padx=2)
-        
-        options_data.append((row_frame, name_var, default_var, tooltip_key_var, tooltip_text_var))
 
+
+
+
+
+
+
+
+
+
+
+        tk.Label(tooltip_row, text="Tooltip desc:", width=12).pack(side="left")
+        tooltip_text_var = tk.StringVar(value=tooltip_text)
+        tk.Entry(tooltip_row, textvariable=tooltip_text_var, width=50).pack(side="left", fill="x", expand=True, padx=2)
+
+        options_data.append((row_frame, name_var, default_var, tooltip_text_var))
     def renumber_options():
         """Renumérote les options après suppression"""
         for i, item in enumerate(options_data, start=1):
@@ -390,17 +397,20 @@ def build_event_tab(parent, path_var, tag_var):
         # Collecter les options
         options = []
         for i, item in enumerate(options_data, start=1):
-            w, name_var, default_var, tooltip_key_var, tooltip_text_var = item
+
+            w, name_var, default_var, tooltip_text_var = item
             opt_name = name_var.get().strip()
-            opt_tooltip_key = tooltip_key_var.get().strip()
+
+
+
             opt_tooltip_text = tooltip_text_var.get().strip()
-
             # Auto-générer la clé seulement s'il y a du texte tooltip
-            if not opt_tooltip_key and opt_tooltip_text:
-                opt_tooltip_key = f"{key}_desc.a{i}"
-            elif not opt_tooltip_text:
-                opt_tooltip_key = ""
 
+
+
+
+
+            opt_tooltip_key = f"{key}_desc.a{i}" if opt_tooltip_text else ""
             if opt_name:
                 options.append({
                     'index': i,
@@ -518,17 +528,20 @@ def build_event_tab(parent, path_var, tag_var):
         # Collecter les options
         options = []
         for i, item in enumerate(options_data, start=1):
-            w, name_var, default_var, tooltip_key_var, tooltip_text_var = item
+
+            w, name_var, default_var, tooltip_text_var = item
             opt_name = name_var.get().strip()
-            opt_tooltip_key = tooltip_key_var.get().strip()
+
+
+
             opt_tooltip_text = tooltip_text_var.get().strip()
-
             # Auto-générer la clé seulement s'il y a du texte tooltip
-            if not opt_tooltip_key and opt_tooltip_text:
-                opt_tooltip_key = f"{key}_desc.a{i}"
-            elif not opt_tooltip_text:
-                opt_tooltip_key = ""
 
+
+
+
+
+            opt_tooltip_key = f"{key}_desc.a{i}" if opt_tooltip_text else ""
             if opt_name:
                 options.append({
                     'index': i,
@@ -683,12 +696,15 @@ def build_event_tab(parent, path_var, tag_var):
                 raw_tooltip = opt.get("tooltip", "")
                 # Si la valeur contient des espaces, c'est un texte littéral, pas une clé
                 if " " in raw_tooltip:
-                    tooltip_key = ""
+
+
                     tooltip_text = raw_tooltip
                 else:
-                    tooltip_key = raw_tooltip
+
+
+
                     tooltip_text = opt.get("tooltip_text", "")
-                add_option_widget(name=name_text, is_default=opt.get("is_default", False), tooltip_key=tooltip_key, tooltip_text=tooltip_text)
+                add_option_widget(name=name_text, is_default=opt.get("is_default", False), tooltip_text=tooltip_text)
 
     def delete_selected_event():
         """Supprime l'événement sélectionné"""
@@ -737,4 +753,3 @@ def build_event_tab(parent, path_var, tag_var):
             messagebox.showerror("Erreur", f"{type(e).__name__}: {e!s}")
 
     return outer
-
