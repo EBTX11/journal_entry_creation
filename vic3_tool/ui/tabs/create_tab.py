@@ -34,6 +34,33 @@ CONDITION_SPECS = [
 CONDITION_NAMES = [s[0] for s in CONDITION_SPECS]
 CONDITION_MAP   = {s[0]: (s[1], s[2]) for s in CONDITION_SPECS}
 
+
+def apply_indent(cond, base):
+    return "\n".join(base + line for line in cond.split("\n"))
+
+
+def collect_conditions(feat_key, features_data, base="        ", inner="            "):
+    standalone, and_group, or_group = [], [], []
+    for r in features_data[feat_key]["rows"]:
+        tmpl, _ = CONDITION_MAP[r["type"].get()]
+        try:
+            raw = tmpl.format(v1=r["v1"].get().strip(), v2=r["v2"].get().strip())
+        except KeyError:
+            raw = tmpl.format(v1=r["v1"].get().strip())
+        cond = f"NOT = {{ {raw} }}" if r["not"].get() else raw
+        if r["and"].get():
+            and_group.append(apply_indent(cond, inner))
+        elif r["or"].get():
+            or_group.append(apply_indent(cond, inner))
+        else:
+            standalone.append(apply_indent(cond, base))
+    if and_group:
+        standalone.append(f"{base}AND = {{\n" + "\n".join(and_group) + f"\n{base}}}")
+    if or_group:
+        standalone.append(f"{base}OR = {{\n" + "\n".join(or_group) + f"\n{base}}}")
+    return standalone
+
+
 DLC_OPTIONS = [
     "", "has_mod_hmm_1804", "has_mod_hmm_1837", "has_mod_hmm_1861",
     "has_mod_hmm_1871", "has_mod_hmm_1890", "has_mod_hmm_1919",
@@ -646,53 +673,22 @@ def build_create_tab(notebook, path_var, tag_var):
                 messagebox.showerror("Erreur", f"{type(e).__name__}: {e!s}")
             return
 
-        # ---- helpers conditions ----
-        def apply_indent(cond, base):
-            return "\n".join(base + line for line in cond.split("\n"))
-
-        def collect_conditions(feat_key, base="        ", inner="            "):
-            standalone, and_group, or_group = [], [], []
-            for r in features_data[feat_key]["rows"]:
-                tmpl, _ = CONDITION_MAP[r["type"].get()]
-                try:
-                    raw = tmpl.format(v1=r["v1"].get().strip(), v2=r["v2"].get().strip())
-                except KeyError:
-                    raw = tmpl.format(v1=r["v1"].get().strip())
-                cond = f"NOT = {{ {raw} }}" if r["not"].get() else raw
-                if r["and"].get():
-                    and_group.append(apply_indent(cond, inner))
-                elif r["or"].get():
-                    or_group.append(apply_indent(cond, inner))
-                else:
-                    standalone.append(apply_indent(cond, base))
-            if and_group:
-                standalone.append(f"{base}AND = {{\n" + "\n".join(and_group) + f"\n{base}}}")
-            if or_group:
-                standalone.append(f"{base}OR = {{\n" + "\n".join(or_group) + f"\n{base}}}")
-            return standalone
-
         # ---- is_shown_when_inactive ----
         is_shown_list = None
         if features_data["is_shown"]["enabled"].get():
-            is_shown_list = collect_conditions("is_shown")
+            is_shown_list = collect_conditions("is_shown", features_data)
             dlc_var = features_data["is_shown"].get("dlc")
             if dlc_var and dlc_var.get():
                 is_shown_list.insert(0, f"        {dlc_var.get()} = yes")
 
         # ---- possible (conditions supplémentaires) ----
-        possible_cond = None
-        if features_data["possible"]["enabled"].get():
-            possible_cond = collect_conditions("possible")
+        possible_cond = collect_conditions("possible", features_data) if features_data["possible"]["enabled"].get() else None
 
         # ---- complete ----
-        complete_cond = None
-        if features_data["complete"]["enabled"].get():
-            complete_cond = collect_conditions("complete")
+        complete_cond = collect_conditions("complete", features_data) if features_data["complete"]["enabled"].get() else None
 
         # ---- fail ----
-        fail_cond = None
-        if features_data["fail"]["enabled"].get():
-            fail_cond = collect_conditions("fail")
+        fail_cond = collect_conditions("fail", features_data) if features_data["fail"]["enabled"].get() else None
 
         # ---- boutons ----
         num_buttons = 0

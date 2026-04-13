@@ -11,7 +11,8 @@ from vic3_tool.models.journal_entry import JournalEntry
 from vic3_tool.utils.file_manager import read_file
 from vic3_tool.utils.formatter import format_text
 from vic3_tool.ui.tabs.create_tab import (
-    CONDITION_SPECS, CONDITION_NAMES, CONDITION_MAP, DLC_OPTIONS, make_tt_list
+    CONDITION_SPECS, CONDITION_NAMES, CONDITION_MAP, DLC_OPTIONS, make_tt_list,
+    apply_indent, collect_conditions,
 )
 
 # ================================================================
@@ -1210,31 +1211,6 @@ def build_manage_tab(parent, path_var, tag_var):
         except Exception as e:
             messagebox.showerror("Erreur", f"{type(e).__name__}: {e!s}")
 
-    # ── Helpers collecte conditions (partagés save_section / on_save) ──
-    def apply_indent(cond, base):
-        return "\n".join(base + line for line in cond.split("\n"))
-
-    def collect_conditions(feat_key, base="        ", inner="            "):
-        standalone, and_group, or_group = [], [], []
-        for r in features_data[feat_key]["rows"]:
-            tmpl, _ = CONDITION_MAP[r["type"].get()]
-            try:
-                raw = tmpl.format(v1=r["v1"].get().strip(), v2=r["v2"].get().strip())
-            except KeyError:
-                raw = tmpl.format(v1=r["v1"].get().strip())
-            cond = f"NOT = {{ {raw} }}" if r["not"].get() else raw
-            if r["and"].get():
-                and_group.append(apply_indent(cond, inner))
-            elif r["or"].get():
-                or_group.append(apply_indent(cond, inner))
-            else:
-                standalone.append(apply_indent(cond, base))
-        if and_group:
-            standalone.append(f"{base}AND = {{\n" + "\n".join(and_group) + f"\n{base}}}")
-        if or_group:
-            standalone.append(f"{base}OR = {{\n" + "\n".join(or_group) + f"\n{base}}}")
-        return standalone
-
     # ── Sauvegarde des infos de base (titre / desc / année) ──────────
     def save_infos():
         key = current_key_var.get()
@@ -1305,7 +1281,7 @@ def build_manage_tab(parent, path_var, tag_var):
             je_obj   = JournalEntry(je_tag, je_index, _year, _title, _desc)
 
             if feat_key == "is_shown":
-                cond = collect_conditions("is_shown")
+                cond = collect_conditions("is_shown", features_data)
                 dlc_v = features_data["is_shown"].get("dlc")
                 if dlc_v and dlc_v.get():
                     cond.insert(0, f"        {dlc_v.get()} = yes")
@@ -1314,19 +1290,19 @@ def build_manage_tab(parent, path_var, tag_var):
                 je_block = patch_named_block_in(je_block, "is_shown_when_inactive", snippet)
 
             elif feat_key == "possible":
-                cond = collect_conditions("possible")
+                cond = collect_conditions("possible", features_data)
                 cond_lines = "\n".join(cond) + "\n" if cond else ""
                 snippet = f"    possible = {{\n        game_date >= {_year}.1.1\n{cond_lines}    }}"
                 je_block = patch_named_block_in(je_block, "possible", snippet)
 
             elif feat_key == "complete":
-                cond = collect_conditions("complete")
+                cond = collect_conditions("complete", features_data)
                 cond_lines = "\n".join(cond) + "\n" if cond else ""
                 snippet = f"    complete = {{\n{cond_lines}    }}"
                 je_block = patch_named_block_in(je_block, "complete", snippet)
 
             elif feat_key == "fail":
-                cond = collect_conditions("fail")
+                cond = collect_conditions("fail", features_data)
                 cond_lines = "\n".join(cond) + "\n" if cond else ""
                 snippet = f"    fail = {{\n{cond_lines}    }}"
                 je_block = patch_named_block_in(je_block, "fail", snippet)
@@ -2042,15 +2018,15 @@ def build_manage_tab(parent, path_var, tag_var):
         # ── is_shown ──
         is_shown_list = None
         if features_data["is_shown"]["enabled"].get():
-            is_shown_list = collect_conditions("is_shown")
+            is_shown_list = collect_conditions("is_shown", features_data)
             dlc_var = features_data["is_shown"].get("dlc")
             if dlc_var and dlc_var.get():
                 is_shown_list.insert(0, f"        {dlc_var.get()} = yes")
 
         # ── possible / complete / fail ──
-        possible_cond  = collect_conditions("possible") if features_data["possible"]["enabled"].get() else None
-        complete_cond  = collect_conditions("complete") if features_data["complete"]["enabled"].get() else None
-        fail_cond      = collect_conditions("fail")     if features_data["fail"]["enabled"].get()     else None
+        possible_cond  = collect_conditions("possible", features_data) if features_data["possible"]["enabled"].get() else None
+        complete_cond  = collect_conditions("complete", features_data) if features_data["complete"]["enabled"].get() else None
+        fail_cond      = collect_conditions("fail",     features_data) if features_data["fail"]["enabled"].get()     else None
 
         # ── Boutons ──
         num_buttons  = 0

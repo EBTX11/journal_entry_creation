@@ -1,6 +1,11 @@
 import os
 
 
+def _lines_to_str(lines):
+    """Convertit une liste de lignes en chaîne terminée par \\n, ou '' si vide/None."""
+    return ("\n".join(lines) + "\n") if lines else ""
+
+
 def generate_je_goal_progress_block(je, global_var, pb_key, goal_value, pulse="monthly"):
     """Génère un JE suivant le schéma 'progress bar pilotée par une variable globale'."""
     return f"""{je.key} = {{
@@ -73,15 +78,13 @@ def generate_je_goal_progress_block(je, global_var, pb_key, goal_value, pulse="m
 """
 
 
-TEMPLATE_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "../templates/je_templates.txt"
-)
+_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "../templates/je_templates.txt")
+with open(_TEMPLATE_PATH, "r", encoding="utf-8") as _f:
+    _TEMPLATE = _f.read()
 
 
 def generate_je_block(je, options):
-    with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
-        template = f.read()
+    template = _TEMPLATE
 
     # -------- IS_SHOWN_WHEN_INACTIVE --------
 
@@ -212,20 +215,15 @@ def generate_je_block(je, options):
 
     # -------- POSSIBLE (conditions supplémentaires) --------
 
-    possible_lines = options.get("possible_conditions")
-    possible_cond_str = ("\n".join(possible_lines) + "\n") if possible_lines else ""
+    possible_cond_str = _lines_to_str(options.get("possible_conditions"))
 
     # -------- COMPLETE --------
 
-    complete_lines = options.get("complete_conditions")
-    complete_cond_str = ("\n".join(complete_lines) + "\n") if complete_lines else ""
+    complete_cond_str = _lines_to_str(options.get("complete_conditions"))
 
     # -------- FAIL --------
 
-    fail_cond_str = ""
-    fail_lines = options.get("fail_conditions")
-    if fail_lines is not None:
-        fail_cond_str = ("\n".join(fail_lines) + "\n") if fail_lines else ""
+    fail_cond_str = _lines_to_str(options.get("fail_conditions"))
 
     # -------- ON_COMPLETE --------
 

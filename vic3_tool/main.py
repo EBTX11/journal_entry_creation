@@ -9,6 +9,26 @@ from vic3_tool.generators.progress_bar_generator import generate_progress_bar
 from vic3_tool.utils.file_manager import ensure_folder, append_to_file, read_file
 
 
+def _inject_global_var(hist_path, var_name):
+    """Insère set_global_variable dans le fichier d'historique si absent."""
+    if not os.path.exists(hist_path):
+        return
+    content = read_file(hist_path)
+    if var_name in content:
+        return
+    var_init = (
+        f"\n    set_global_variable = {{\n"
+        f"        name = {var_name}\n"
+        f"        value = 0\n"
+        f"    }}\n"
+    )
+    last_b = content.rfind('}')
+    if last_b >= 0:
+        content = content[:last_b] + var_init + content[last_b:]
+        with open(hist_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+
 def get_next_je_index(tag, je_path):
     if not os.path.exists(je_path):
         return 1
@@ -107,44 +127,15 @@ def create_full_je(
 
     if progress_bars:
         hist_path = os.path.join(base_path, "common/history/global/00_hmmai_global.txt")
-        if os.path.exists(hist_path):
-            hist_content = read_file(hist_path)
-            changed = False
-            for pb in progress_bars:
-                gv = f"{je.key}_global_variable_progress_bar_{pb['pb_index']}"
-                if gv not in hist_content:
-                    var_init = (
-                        f"\n    set_global_variable = {{\n"
-                        f"        name = {gv}\n"
-                        f"        value = 0\n"
-                        f"    }}\n"
-                    )
-                    last_b = hist_content.rfind('}')
-                    if last_b >= 0:
-                        hist_content = hist_content[:last_b] + var_init + hist_content[last_b:]
-                        changed = True
-            if changed:
-                with open(hist_path, "w", encoding="utf-8") as f:
-                    f.write(hist_content)
+        for pb in progress_bars:
+            gv = f"{je.key}_global_variable_progress_bar_{pb['pb_index']}"
+            _inject_global_var(hist_path, gv)
 
     # -------- HISTORY : global variable for status_desc trigger (new_var mode) --------
 
     if resolved_tvar and status_desc_trigger_var and "_je_X_" in status_desc_trigger_var:
         hist_path = os.path.join(base_path, "common/history/global/00_hmmai_global.txt")
-        if os.path.exists(hist_path):
-            hist_content = read_file(hist_path)
-            if resolved_tvar not in hist_content:
-                var_init = (
-                    f"\n    set_global_variable = {{\n"
-                    f"        name = {resolved_tvar}\n"
-                    f"        value = 0\n"
-                    f"    }}\n"
-                )
-                last_b = hist_content.rfind('}')
-                if last_b >= 0:
-                    hist_content = hist_content[:last_b] + var_init + hist_content[last_b:]
-                    with open(hist_path, "w", encoding="utf-8") as f:
-                        f.write(hist_content)
+        _inject_global_var(hist_path, resolved_tvar)
 
 
 def create_je_goal_progress(
@@ -195,17 +186,4 @@ def create_je_goal_progress(
     append_to_file(loc_path, loc_block)
 
     # Initialiser la variable globale dans l'historique
-    if os.path.exists(hist_path):
-        hist_content = read_file(hist_path)
-        if global_var not in hist_content:
-            var_init = (
-                f"\n    set_global_variable = {{\n"
-                f"        name = {global_var}\n"
-                f"        value = 0\n"
-                f"    }}\n"
-            )
-            last_b = hist_content.rfind('}')
-            if last_b >= 0:
-                hist_content = hist_content[:last_b] + var_init + hist_content[last_b:]
-                with open(hist_path, "w", encoding="utf-8") as f:
-                    f.write(hist_content)
+    _inject_global_var(hist_path, global_var)

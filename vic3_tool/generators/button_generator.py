@@ -1,3 +1,32 @@
+def _build_tt_block(block_name, btn_name, btn_data):
+    """Génère un bloc possible/effect avec custom_tooltips."""
+    modified_key = f"{block_name}_modified"
+    raw_key      = f"{block_name}_raw"
+    tts_key      = f"{block_name}_tts"
+    existing_key = f"{block_name}_existing_tt_count"
+
+    if btn_data.get(modified_key) and btn_data.get(raw_key) is not None:
+        raw_inner      = btn_data[raw_key]
+        tts            = btn_data.get(tts_key) or []
+        existing_count = btn_data.get(existing_key, len(tts))
+        new_tts        = tts[existing_count:]
+        if new_tts:
+            start_num  = existing_count + 1
+            injections = "\n".join(
+                f"        custom_tooltip = {{\n            text = {btn_name}_tt_{block_name}_{start_num + j}\n        }}"
+                for j in range(len(new_tts))
+            )
+            raw_inner = raw_inner.rstrip() + "\n" + injections + "\n    "
+        return f"    {block_name} = {{{raw_inner}}}"
+    else:
+        tts = btn_data.get(tts_key) or ["Nothing"]
+        tt_lines = "\n".join(
+            f"        custom_tooltip = {{\n            text = {btn_name}_tt_{block_name}_{j}\n        }}"
+            for j in range(1, len(tts) + 1)
+        )
+        return f"    {block_name} = {{\n{tt_lines}\n    }}"
+
+
 def generate_buttons(je, buttons_data):
     content = ""
 
@@ -11,55 +40,9 @@ def generate_buttons(je, buttons_data):
     cooldown = {{ {unit} = {btn_data['cooldown']} }}
 """
 
-        # ── possible block ──────────────────────────────────────────
-        if btn_data.get("possible_modified") and btn_data.get("possible_raw") is not None:
-            # Bloc modifié manuellement : on préserve le contenu existant
-            # et on injecte uniquement les nouvelles entrées TT (au-delà du compte initial)
-            raw_inner      = btn_data["possible_raw"]
-            possible_tts   = btn_data.get("possible_tts") or []
-            existing_count = btn_data.get("possible_existing_tt_count", len(possible_tts))
-            new_tts        = possible_tts[existing_count:]
-
-            if new_tts:
-                start_num  = existing_count + 1
-                injections = "\n".join(
-                    f"        custom_tooltip = {{\n            text = {btn}_tt_possible_{start_num + j}\n        }}"
-                    for j in range(len(new_tts))
-                )
-                raw_inner = raw_inner.rstrip() + "\n" + injections + "\n    "
-
-            possible_block = f"    possible = {{{raw_inner}}}"
-        else:
-            possible_tts = btn_data.get("possible_tts") or ["Nothing"]
-            tt_lines = "\n".join(
-                f"        custom_tooltip = {{\n            text = {btn}_tt_possible_{j}\n        }}"
-                for j in range(1, len(possible_tts) + 1)
-            )
-            possible_block = f"    possible = {{\n{tt_lines}\n    }}"
-
-        # ── effect block ────────────────────────────────────────────
-        if btn_data.get("effect_modified") and btn_data.get("effect_raw") is not None:
-            raw_inner      = btn_data["effect_raw"]
-            effect_tts     = btn_data.get("effect_tts") or []
-            existing_count = btn_data.get("effect_existing_tt_count", len(effect_tts))
-            new_tts        = effect_tts[existing_count:]
-
-            if new_tts:
-                start_num  = existing_count + 1
-                injections = "\n".join(
-                    f"        custom_tooltip = {{\n            text = {btn}_tt_effect_{start_num + j}\n        }}"
-                    for j in range(len(new_tts))
-                )
-                raw_inner = raw_inner.rstrip() + "\n" + injections + "\n    "
-
-            effect_block = f"    effect = {{{raw_inner}}}"
-        else:
-            effect_tts = btn_data.get("effect_tts") or ["Nothing"]
-            effect_tt_lines = "\n".join(
-                f"        custom_tooltip = {{\n            text = {btn}_tt_effect_{j}\n        }}"
-                for j in range(1, len(effect_tts) + 1)
-            )
-            effect_block = f"    effect = {{\n{effect_tt_lines}\n    }}"
+        # ── possible / effect blocks ────────────────────────────────
+        possible_block = _build_tt_block("possible", btn, btn_data)
+        effect_block   = _build_tt_block("effect",   btn, btn_data)
 
         # ── visible block ───────────────────────────────────────────
         if btn_data.get("visible_modified") and btn_data.get("visible_raw") is not None:
