@@ -349,10 +349,48 @@ def build_create_tab(notebook, path_var, tag_var):
                 tk.Label(row, text=f"Status {i} :").pack(side="left")
                 sv = tk.StringVar()
                 tk.Entry(row, textvariable=sv, width=28).pack(side="left", padx=4)
-                tk.Label(row, text="val=").pack(side="left")
                 vv = tk.StringVar(value=str(i))
-                tk.Entry(row, textvariable=vv, width=5).pack(side="left")
-                features_data["status_desc"]["rows"].append({"text": sv, "value": vv})
+                min_v = tk.StringVar()
+                max_v = tk.StringVar()
+                range_var = tk.BooleanVar(value=False)
+
+                value_label = tk.Label(row, text="val=")
+                value_entry = tk.Entry(row, textvariable=vv, width=5)
+                range_check = ttk.Checkbutton(row, text="Plage", variable=range_var)
+                min_label = tk.Label(row, text="min >")
+                min_entry = tk.Entry(row, textvariable=min_v, width=5)
+                max_label = tk.Label(row, text="max <=")
+                max_entry = tk.Entry(row, textvariable=max_v, width=5)
+
+                def toggle_mode(*_, _value_label=value_label, _value_entry=value_entry,
+                                _min_label=min_label, _min_entry=min_entry,
+                                _max_label=max_label, _max_entry=max_entry,
+                                _range_var=range_var):
+                    if _range_var.get():
+                        _value_label.pack_forget()
+                        _value_entry.pack_forget()
+                        _min_label.pack(side="left")
+                        _min_entry.pack(side="left", padx=(4, 0))
+                        _max_label.pack(side="left", padx=(8, 0))
+                        _max_entry.pack(side="left", padx=(4, 0))
+                    else:
+                        _min_label.pack_forget()
+                        _min_entry.pack_forget()
+                        _max_label.pack_forget()
+                        _max_entry.pack_forget()
+                        _value_label.pack(side="left")
+                        _value_entry.pack(side="left", padx=(4, 0))
+
+                range_check.pack(side="left", padx=(8, 0))
+                toggle_mode()
+                range_var.trace_add("write", toggle_mode)
+                features_data["status_desc"]["rows"].append({
+                    "text": sv,
+                    "value": vv,
+                    "use_range": range_var,
+                    "min": min_v,
+                    "max": max_v,
+                })
 
         tk.Spinbox(parent, from_=2, to=10, textvariable=num_var,
                    width=4, command=refresh_status).pack(anchor="w")
@@ -678,8 +716,21 @@ def build_create_tab(notebook, path_var, tag_var):
         if features_data["status_desc"]["enabled"].get():
             _sd_rows = features_data["status_desc"]["rows"]
             status_desc_list = [r["text"].get() for r in _sd_rows if r["text"].get().strip()]
-            status_desc_tvals = [r["value"].get().strip() or str(i + 1)
-                                 for i, r in enumerate(_sd_rows) if r["text"].get().strip()]
+            status_desc_tvals = []
+            for i, r in enumerate(_sd_rows):
+                if not r["text"].get().strip():
+                    continue
+                if r.get("use_range") and r["use_range"].get():
+                    status_desc_tvals.append({
+                        "mode": "range",
+                        "min": r["min"].get().strip(),
+                        "max": r["max"].get().strip(),
+                    })
+                else:
+                    status_desc_tvals.append({
+                        "mode": "fixed",
+                        "value": r["value"].get().strip() or str(i + 1),
+                    })
             if len(status_desc_list) < 2:
                 messagebox.showerror("Erreur", "Status desc nécessite au minimum 2 entrées.")
                 return

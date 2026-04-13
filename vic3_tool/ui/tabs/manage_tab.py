@@ -435,11 +435,24 @@ def parse_je_data(je_path, loc_path, btn_path, pb_path, key):
 
     # Status desc trigger — cherche dans le bloc JE
     sd_block = extract_named_block(block, "status_desc") or ""
-    trig_m = re.search(r'global_var:(\S+)\s*=\s*\S+', sd_block)
+    triggered_blocks = re.findall(r'triggered_desc\s*=\s*\{(.*?)\n\s*\}', sd_block, re.DOTALL)
+    trig_m = re.search(r'global_var:(\S+)\s*(?:=|>|<=)\s*\S+', sd_block)
     if trig_m:
         data["status_desc_trigger_var"] = trig_m.group(1)
-        data["status_desc_trigger_values"] = re.findall(
-            r'global_var:\S+\s*=\s*(\S+)', sd_block)
+        specs = []
+        for tb in triggered_blocks:
+            fixed_m = re.search(r'global_var:\S+\s*=\s*(\S+)', tb)
+            min_m = re.search(r'global_var:\S+\s*>\s*(\S+)', tb)
+            max_m = re.search(r'global_var:\S+\s*<=\s*(\S+)', tb)
+            if fixed_m:
+                specs.append({"mode": "fixed", "value": fixed_m.group(1)})
+            elif min_m or max_m:
+                specs.append({
+                    "mode": "range",
+                    "min": min_m.group(1) if min_m else "",
+                    "max": max_m.group(1) if max_m else "",
+                })
+        data["status_desc_trigger_values"] = specs
     else:
         data["status_desc_trigger_var"] = ""
         data["status_desc_trigger_values"] = []
@@ -912,10 +925,48 @@ def build_manage_tab(parent, path_var, tag_var):
                 ttk.Label(row, text=f"Status {i} :").pack(side="left")
                 sv = tk.StringVar()
                 ttk.Entry(row, textvariable=sv, width=28).pack(side="left", padx=4)
-                ttk.Label(row, text="val=").pack(side="left")
                 vv = tk.StringVar(value=str(i))
-                ttk.Entry(row, textvariable=vv, width=5).pack(side="left")
-                features_data["status_desc"]["rows"].append({"text": sv, "value": vv})
+                min_v = tk.StringVar()
+                max_v = tk.StringVar()
+                range_var = tk.BooleanVar(value=False)
+
+                value_label = ttk.Label(row, text="val=")
+                value_entry = ttk.Entry(row, textvariable=vv, width=5)
+                range_check = ttk.Checkbutton(row, text="Plage", variable=range_var)
+                min_label = ttk.Label(row, text="min >")
+                min_entry = ttk.Entry(row, textvariable=min_v, width=5)
+                max_label = ttk.Label(row, text="max <=")
+                max_entry = ttk.Entry(row, textvariable=max_v, width=5)
+
+                def toggle_mode(*_, _value_label=value_label, _value_entry=value_entry,
+                                _min_label=min_label, _min_entry=min_entry,
+                                _max_label=max_label, _max_entry=max_entry,
+                                _range_var=range_var):
+                    if _range_var.get():
+                        _value_label.pack_forget()
+                        _value_entry.pack_forget()
+                        _min_label.pack(side="left")
+                        _min_entry.pack(side="left", padx=(4, 0))
+                        _max_label.pack(side="left", padx=(8, 0))
+                        _max_entry.pack(side="left", padx=(4, 0))
+                    else:
+                        _min_label.pack_forget()
+                        _min_entry.pack_forget()
+                        _max_label.pack_forget()
+                        _max_entry.pack_forget()
+                        _value_label.pack(side="left")
+                        _value_entry.pack(side="left", padx=(4, 0))
+
+                range_check.pack(side="left", padx=(8, 0))
+                toggle_mode()
+                range_var.trace_add("write", toggle_mode)
+                features_data["status_desc"]["rows"].append({
+                    "text": sv,
+                    "value": vv,
+                    "use_range": range_var,
+                    "min": min_v,
+                    "max": max_v,
+                })
 
         ttk.Spinbox(parent, from_=2, to=10, textvariable=num_var,
                     width=4, command=refresh_status).pack(anchor="w")
@@ -1336,8 +1387,21 @@ def build_manage_tab(parent, path_var, tag_var):
             elif feat_key == "status_desc":
                 sd_rows = features_data["status_desc"]["rows"]
                 sd_list = [r["text"].get() for r in sd_rows if r["text"].get().strip()]
-                sd_values = [r["value"].get().strip() or str(i+1)
-                             for i, r in enumerate(sd_rows) if r["text"].get().strip()]
+                sd_values = []
+                for i, r in enumerate(sd_rows):
+                    if not r["text"].get().strip():
+                        continue
+                    if r.get("use_range") and r["use_range"].get():
+                        sd_values.append({
+                            "mode": "range",
+                            "min": r["min"].get().strip(),
+                            "max": r["max"].get().strip(),
+                        })
+                    else:
+                        sd_values.append({
+                            "mode": "fixed",
+                            "value": r["value"].get().strip() or str(i + 1),
+                        })
                 _tm = features_data["status_desc"].get("trigger_mode")
                 _mode = _tm.get() if _tm else "none"
                 if _mode == "none":
@@ -1350,9 +1414,27 @@ def build_manage_tab(parent, path_var, tag_var):
                 entries = ""
                 for i, text in enumerate(sd_list, start=1):
                     sk = f"{key}_status_desc_{i}"
-                    val = sd_values[i - 1] if i <= len(sd_values) else str(i)
-                    trig_inner = (f"\n                    global_var:{_tvar} = {val}\n"
-                                  f"                ") if _tvar else ""
+                    spec = sd_values[i - 1] if i <= len(sd_values) else {"mode": "fixed", "value": str(i)}
+                    if _tvar:
+                        if isinstance(spec, dict) and spec.get("mode") == "range":
+                            trig_lines = []
+                            if spec.get("min", "").strip():
+                                trig_lines.append(f"global_var:{_tvar} > {spec['min'].strip()}")
+                            if spec.get("max", "").strip():
+                                trig_lines.append(f"global_var:{_tvar} <= {spec['max'].strip()}")
+                            trig_inner = (
+                                "\n                    "
+                                + "\n                    ".join(trig_lines)
+                                + "\n                "
+                            ) if trig_lines else ""
+                        else:
+                            val = spec.get("value", "").strip() if isinstance(spec, dict) else str(spec)
+                            if not val:
+                                val = str(i)
+                            trig_inner = (f"\n                    global_var:{_tvar} = {val}\n"
+                                          f"                ")
+                    else:
+                        trig_inner = ""
                     entries += (
                         f"\n            triggered_desc = {{\n"
                         f"                desc = {sk}\n"
@@ -1813,7 +1895,18 @@ def build_manage_tab(parent, path_var, tag_var):
                             _cv_fd.set(_tvar_d)
             for i, row in enumerate(features_data["status_desc"]["rows"]):
                 if i < len(_tvals_d):
-                    row["value"].set(_tvals_d[i])
+                    spec = _tvals_d[i]
+                    if isinstance(spec, dict) and spec.get("mode") == "range":
+                        row["use_range"].set(True)
+                        row["min"].set(spec.get("min", ""))
+                        row["max"].set(spec.get("max", ""))
+                        row["value"].set("")
+                    elif isinstance(spec, dict):
+                        row["use_range"].set(False)
+                        row["value"].set(spec.get("value", ""))
+                    else:
+                        row["use_range"].set(False)
+                        row["value"].set(spec)
 
         # ── Progress bars ──
         if d["progress_bars"]:
@@ -1991,8 +2084,21 @@ def build_manage_tab(parent, path_var, tag_var):
         if features_data["status_desc"]["enabled"].get():
             _sd_rows = features_data["status_desc"]["rows"]
             status_desc_list = [r["text"].get() for r in _sd_rows if r["text"].get().strip()]
-            status_desc_tvals = [r["value"].get().strip() or str(i + 1)
-                                 for i, r in enumerate(_sd_rows) if r["text"].get().strip()]
+            status_desc_tvals = []
+            for i, r in enumerate(_sd_rows):
+                if not r["text"].get().strip():
+                    continue
+                if r.get("use_range") and r["use_range"].get():
+                    status_desc_tvals.append({
+                        "mode": "range",
+                        "min": r["min"].get().strip(),
+                        "max": r["max"].get().strip(),
+                    })
+                else:
+                    status_desc_tvals.append({
+                        "mode": "fixed",
+                        "value": r["value"].get().strip() or str(i + 1),
+                    })
             _stm = features_data["status_desc"].get("trigger_mode")
             _smode = _stm.get() if _stm else "none"
             if _smode == "new_var":
@@ -2088,10 +2194,33 @@ def build_manage_tab(parent, path_var, tag_var):
                     entries = ""
                     for i, text in enumerate(status_desc_list, start=1):
                         sk = f"{key}_status_desc_{i}"
-                        val = (status_desc_tvals[i - 1]
-                               if status_desc_tvals and i <= len(status_desc_tvals) else str(i))
-                        trig_in = (f"\n                    global_var:{status_desc_tvar} = {val}\n"
-                                   f"                ") if status_desc_tvar else ""
+                        spec = (status_desc_tvals[i - 1]
+                                if status_desc_tvals and i <= len(status_desc_tvals)
+                                else {"mode": "fixed", "value": str(i)})
+                        if status_desc_tvar:
+                            if isinstance(spec, dict) and spec.get("mode") == "range":
+                                trig_lines = []
+                                if spec.get("min", "").strip():
+                                    trig_lines.append(
+                                        f"global_var:{status_desc_tvar} > {spec['min'].strip()}"
+                                    )
+                                if spec.get("max", "").strip():
+                                    trig_lines.append(
+                                        f"global_var:{status_desc_tvar} <= {spec['max'].strip()}"
+                                    )
+                                trig_in = (
+                                    "\n                    "
+                                    + "\n                    ".join(trig_lines)
+                                    + "\n                "
+                                ) if trig_lines else ""
+                            else:
+                                val = spec.get("value", "").strip() if isinstance(spec, dict) else str(spec)
+                                if not val:
+                                    val = str(i)
+                                trig_in = (f"\n                    global_var:{status_desc_tvar} = {val}\n"
+                                           f"                ")
+                        else:
+                            trig_in = ""
                         entries += (
                             f"\n            triggered_desc = {{\n"
                             f"                desc = {sk}\n"

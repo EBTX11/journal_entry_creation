@@ -109,9 +109,29 @@ def generate_je_block(je, options):
         entries = ""
         for i, text in enumerate(options["status_desc"], start=1):
             loc_key = f"{je.key}_status_desc_{i}"
-            val = _tvals[i - 1] if i - 1 < len(_tvals) else str(i)
+            spec = _tvals[i - 1] if i - 1 < len(_tvals) else str(i)
             if _tvar:
-                trigger_inner = f"\n                    global_var:{_tvar} = {val}\n                "
+                if isinstance(spec, dict) and spec.get("mode") == "range":
+                    trigger_lines = []
+                    min_val = spec.get("min", "").strip()
+                    max_val = spec.get("max", "").strip()
+                    if min_val:
+                        trigger_lines.append(f"global_var:{_tvar} > {min_val}")
+                    if max_val:
+                        trigger_lines.append(f"global_var:{_tvar} <= {max_val}")
+                    if trigger_lines:
+                        trigger_inner = (
+                            "\n                    "
+                            + "\n                    ".join(trigger_lines)
+                            + "\n                "
+                        )
+                    else:
+                        trigger_inner = "\n                "
+                else:
+                    val = spec.get("value", "").strip() if isinstance(spec, dict) else str(spec)
+                    if not val:
+                        val = str(i)
+                    trigger_inner = f"\n                    global_var:{_tvar} = {val}\n                "
             else:
                 trigger_inner = "\n                "
 
