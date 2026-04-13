@@ -26,7 +26,10 @@ def create_full_je(
     base_path, tag, year, title, desc,
     num_buttons, buttons_data,
     progress_bars=None,
+    pb_pulse="monthly",
     status_desc=None,
+    status_desc_trigger_var=None,
+    status_desc_trigger_vals=None,
     monthly_empty=False,
     yearly=False,
     modifiers=False,
@@ -54,21 +57,35 @@ def create_full_je(
     if progress_bars:
         for pb in progress_bars:
             pb["key"] = f"{je.key}_{pb['pb_index']}_progress_bar"
+            gv  = f"{je.key}_global_variable_progress_bar_{pb['pb_index']}"
+            sfx = f"[GetGlobalVariable('{gv}').GetValue|D]/ {pb['max']}"
+            pb["desc"] = (pb["desc"] + " " + sfx).strip() if pb.get("desc") else sfx
+
+    # -------- RÉSOUDRE LA VARIABLE TRIGGER STATUS_DESC --------
+
+    # Si l'appelant a fourni un placeholder contenant "TAG_je_X", on le remplace
+    # par le vrai je.key maintenant que l'index est connu.
+    resolved_tvar = None
+    if status_desc_trigger_var:
+        resolved_tvar = re.sub(r'\b[A-Z]+_je_X\b', je.key, status_desc_trigger_var)
 
     # -------- OPTIONS POUR LE TEMPLATE --------
 
     options = {
-        "buttons":             num_buttons,
-        "progress_bars":       progress_bars,
-        "status_desc":         status_desc,
-        "monthly_empty":       monthly_empty,
-        "yearly":              yearly,
-        "modifiers":           modifiers,
-        "on_fail":             on_fail,
-        "is_shown":            is_shown,
-        "possible_conditions": possible_conditions,
-        "complete_conditions": complete_conditions,
-        "fail_conditions":     fail_conditions,
+        "buttons":                  num_buttons,
+        "progress_bars":            progress_bars,
+        "pb_pulse":                 pb_pulse,
+        "status_desc":              status_desc,
+        "status_desc_trigger_var":  resolved_tvar,
+        "status_desc_trigger_vals": status_desc_trigger_vals or [],
+        "monthly_empty":            monthly_empty,
+        "yearly":                   yearly,
+        "modifiers":                modifiers,
+        "on_fail":                  on_fail,
+        "is_shown":                 is_shown,
+        "possible_conditions":      possible_conditions,
+        "complete_conditions":      complete_conditions,
+        "fail_conditions":          fail_conditions,
     }
 
     # -------- WRITE FILES --------
@@ -85,6 +102,49 @@ def create_full_je(
     if progress_bars:
         for pb in progress_bars:
             append_to_file(pb_path, generate_progress_bar(pb))
+
+    # -------- HISTORY : global variables for progress bars --------
+
+    if progress_bars:
+        hist_path = os.path.join(base_path, "common/history/global/00_hmmai_global.txt")
+        if os.path.exists(hist_path):
+            hist_content = read_file(hist_path)
+            changed = False
+            for pb in progress_bars:
+                gv = f"{je.key}_global_variable_progress_bar_{pb['pb_index']}"
+                if gv not in hist_content:
+                    var_init = (
+                        f"\n    set_global_variable = {{\n"
+                        f"        name = {gv}\n"
+                        f"        value = 0\n"
+                        f"    }}\n"
+                    )
+                    last_b = hist_content.rfind('}')
+                    if last_b >= 0:
+                        hist_content = hist_content[:last_b] + var_init + hist_content[last_b:]
+                        changed = True
+            if changed:
+                with open(hist_path, "w", encoding="utf-8") as f:
+                    f.write(hist_content)
+
+    # -------- HISTORY : global variable for status_desc trigger (new_var mode) --------
+
+    if resolved_tvar and status_desc_trigger_var and "_je_X_" in status_desc_trigger_var:
+        hist_path = os.path.join(base_path, "common/history/global/00_hmmai_global.txt")
+        if os.path.exists(hist_path):
+            hist_content = read_file(hist_path)
+            if resolved_tvar not in hist_content:
+                var_init = (
+                    f"\n    set_global_variable = {{\n"
+                    f"        name = {resolved_tvar}\n"
+                    f"        value = 0\n"
+                    f"    }}\n"
+                )
+                last_b = hist_content.rfind('}')
+                if last_b >= 0:
+                    hist_content = hist_content[:last_b] + var_init + hist_content[last_b:]
+                    with open(hist_path, "w", encoding="utf-8") as f:
+                        f.write(hist_content)
 
 
 def create_je_goal_progress(
@@ -110,7 +170,7 @@ def create_je_goal_progress(
     _gv_suffix  = f"[GetGlobalVariable('{global_var}').GetValue|D]/ {goal_value}"
     tt_complete = (f"{tt_complete} " if tt_complete else "") + _gv_suffix
 
-    pb_desc_suffix = f" {_gv_suffix}/ {goal_value}"
+    pb_desc_suffix = f" {_gv_suffix}"
     pb_desc_final  = pb_desc + pb_desc_suffix if pb_desc else pb_desc_suffix.strip()
 
     pb_data = {

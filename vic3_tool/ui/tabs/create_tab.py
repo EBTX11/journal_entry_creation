@@ -296,6 +296,44 @@ def build_create_tab(notebook, path_var, tag_var):
     # ============================================================
 
     def build_status_config(parent, key):
+        # ── Sélecteur trigger ──
+        trigger_mode_var = tk.StringVar(value="none")
+        features_data["status_desc"]["trigger_mode"] = trigger_mode_var
+        trig_f = ttk.Frame(parent)
+        trig_f.pack(fill="x", pady=(0, 2))
+        tk.Label(trig_f, text="Trigger :").pack(side="left")
+        for lbl, val in [("Aucun", "none"), ("Nouvelle var globale", "new_var"),
+                          ("Var progress bar", "pb_var"), ("Champ libre", "custom")]:
+            tk.Radiobutton(trig_f, text=lbl, variable=trigger_mode_var,
+                           value=val).pack(side="left", padx=2)
+
+        var_row_f = ttk.Frame(parent)
+        tk.Label(var_row_f, text="Variable :", width=10, anchor="w").pack(side="left")
+        custom_var = tk.StringVar()
+        features_data["status_desc"]["trigger_custom_var"] = custom_var
+        trig_entry = ttk.Entry(var_row_f, textvariable=custom_var, width=46)
+        trig_entry.pack(side="left", fill="x", expand=True)
+
+        def _on_trig(*_):
+            mode = trigger_mode_var.get()
+            if mode == "none":
+                var_row_f.pack_forget()
+            else:
+                var_row_f.pack(fill="x", pady=2)
+                if mode == "new_var":
+                    trig_entry.config(state="disabled")
+                else:
+                    if mode == "pb_var":
+                        pb_rows = features_data["progress_bars"]["rows"]
+                        if pb_rows:
+                            custom_var.set(f"TAG_je_X_global_variable_progress_bar_{pb_rows[0]['pb_index']}")
+                        else:
+                            custom_var.set("TAG_je_X_global_variable_progress_bar_1")
+                    trig_entry.config(state="normal")
+
+        trigger_mode_var.trace_add("write", _on_trig)
+
+        # ── Nombre de lignes ──
         tk.Label(parent, text="Nombre de status_desc (min 2) :").pack(anchor="w")
         num_var = tk.IntVar(value=2)
         status_rows_frame = ttk.Frame(parent)
@@ -308,10 +346,13 @@ def build_create_tab(notebook, path_var, tag_var):
             for i in range(1, n + 1):
                 row = ttk.Frame(status_rows_frame)
                 row.pack(fill="x", pady=1)
-                tk.Label(row, text=f"Status desc {i} — Texte :").pack(side="left")
+                tk.Label(row, text=f"Status {i} :").pack(side="left")
                 sv = tk.StringVar()
-                tk.Entry(row, textvariable=sv, width=36).pack(side="left", padx=4)
-                features_data["status_desc"]["rows"].append(sv)
+                tk.Entry(row, textvariable=sv, width=28).pack(side="left", padx=4)
+                tk.Label(row, text="val=").pack(side="left")
+                vv = tk.StringVar(value=str(i))
+                tk.Entry(row, textvariable=vv, width=5).pack(side="left")
+                features_data["status_desc"]["rows"].append({"text": sv, "value": vv})
 
         tk.Spinbox(parent, from_=2, to=10, textvariable=num_var,
                    width=4, command=refresh_status).pack(anchor="w")
@@ -323,6 +364,14 @@ def build_create_tab(notebook, path_var, tag_var):
     # ============================================================
 
     def build_pb_config(parent, key):
+        pb_pulse_var = tk.StringVar(value="monthly")
+        pulse_row = ttk.Frame(parent)
+        pulse_row.pack(fill="x", pady=2)
+        tk.Label(pulse_row, text="Pulse :").pack(side="left")
+        tk.Radiobutton(pulse_row, text="on_monthly_pulse", variable=pb_pulse_var, value="monthly").pack(side="left")
+        tk.Radiobutton(pulse_row, text="on_yearly_pulse",  variable=pb_pulse_var, value="yearly").pack(side="left", padx=8)
+        features_data["progress_bars"]["pulse_var"] = pb_pulse_var
+
         tk.Label(parent, text="Nombre de progress bars :").pack(anchor="w")
         num_var = tk.IntVar(value=1)
         pb_rows_frame = ttk.Frame(parent)
@@ -624,11 +673,25 @@ def build_create_tab(notebook, path_var, tag_var):
 
         # ---- status_desc ----
         status_desc_list = None
+        status_desc_tvar = None
+        status_desc_tvals = []
         if features_data["status_desc"]["enabled"].get():
-            status_desc_list = [r.get() for r in features_data["status_desc"]["rows"] if r.get().strip()]
+            _sd_rows = features_data["status_desc"]["rows"]
+            status_desc_list = [r["text"].get() for r in _sd_rows if r["text"].get().strip()]
+            status_desc_tvals = [r["value"].get().strip() or str(i + 1)
+                                 for i, r in enumerate(_sd_rows) if r["text"].get().strip()]
             if len(status_desc_list) < 2:
                 messagebox.showerror("Erreur", "Status desc nécessite au minimum 2 entrées.")
                 return
+            _stm = features_data["status_desc"].get("trigger_mode")
+            _smode = _stm.get() if _stm else "none"
+            if _smode == "new_var":
+                status_desc_tvar = f"{tag.upper()}_je_X_global_variable_1"
+            elif _smode in ("pb_var", "custom"):
+                _scv = features_data["status_desc"].get("trigger_custom_var")
+                status_desc_tvar = _scv.get().strip() if _scv else None
+            else:
+                status_desc_tvar = None
 
         # ---- progress bars ----
         progress_bars = None
@@ -649,6 +712,7 @@ def build_create_tab(notebook, path_var, tag_var):
                     "monthly_desc":  r["monthly_desc"].get().strip() or None,
                 })
 
+        _pv = features_data["progress_bars"].get("pulse_var")
         try:
             create_full_je(
                 base_path=base_path,
@@ -659,7 +723,10 @@ def build_create_tab(notebook, path_var, tag_var):
                 num_buttons=num_buttons,
                 buttons_data=buttons_data,
                 progress_bars=progress_bars,
+                pb_pulse=_pv.get() if _pv else "monthly",
                 status_desc=status_desc_list,
+                status_desc_trigger_var=status_desc_tvar,
+                status_desc_trigger_vals=status_desc_tvals,
                 monthly_empty=features_data["monthly_empty"]["enabled"].get(),
                 yearly=features_data["yearly"]["enabled"].get(),
                 is_shown=is_shown_list,

@@ -104,15 +104,21 @@ def generate_je_block(je, options):
 
     status_block = ""
     if options.get("status_desc"):
+        _tvar  = options.get("status_desc_trigger_var")
+        _tvals = options.get("status_desc_trigger_vals") or []
         entries = ""
         for i, text in enumerate(options["status_desc"], start=1):
-            key = f"{je.key}_status_desc_{i}"
+            loc_key = f"{je.key}_status_desc_{i}"
+            val = _tvals[i - 1] if i - 1 < len(_tvals) else str(i)
+            if _tvar:
+                trigger_inner = f"\n                    global_var:{_tvar} = {val}\n                "
+            else:
+                trigger_inner = "\n                "
 
             entries += f"""
             triggered_desc = {{
-                desc = {key}
-                trigger = {{
-                }}
+                desc = {loc_key}
+                trigger = {{{trigger_inner}}}
             }}
 """
 
@@ -130,21 +136,23 @@ def generate_je_block(je, options):
     monthly_progress = ""
 
     if options.get("progress_bars"):
+        pb_pulse = options.get("pb_pulse", "monthly")
         progress_link = "\n".join(
             f"    scripted_progress_bar = {pb['key']}"
             for pb in options["progress_bars"]
         )
 
-        monthly_progress = """
-    on_monthly_pulse = {
-        effect = {
+        monthly_progress = f"""
+    on_{pb_pulse}_pulse = {{
+        effect = {{
 """
 
         for pb in options["progress_bars"]:
+            gv = f"{je.key}_global_variable_progress_bar_{pb['pb_index']}"
             monthly_progress += f"""
             je:{je.key} ?= {{
                 set_bar_progress = {{
-                    value = 0
+                    value = global_var:{gv}
                     name = {pb['key']}
                 }}
             }}

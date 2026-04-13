@@ -108,19 +108,22 @@ def build_modifier_tab(parent, path_var, tag_var):
 
     def load_modifiers():
         modifier_listbox.delete(0, tk.END)
-        _, mod_path, _ = get_paths()
+        _, mod_path, loc_path = get_paths()
         tag = tag_var.get().upper().strip()
         if not tag:
             return
+        loc_content = read_text(loc_path)
         for key in list_modifier_keys(read_text(mod_path), tag):
-            modifier_listbox.insert(tk.END, key)
+            loc_name = get_loc_value(loc_content, key)
+            display = f"{key} - {loc_name}" if loc_name else key
+            modifier_listbox.insert(tk.END, display)
 
     def load_selected_modifier():
         sel = modifier_listbox.curselection()
         if not sel:
             return
 
-        key = modifier_listbox.get(sel[0])
+        key = modifier_listbox.get(sel[0]).split(" - ")[0].strip()
         _, mod_path, loc_path = get_paths()
         mod_content = read_text(mod_path)
         loc_content = read_text(loc_path)
@@ -197,8 +200,14 @@ def build_modifier_tab(parent, path_var, tag_var):
     left_col.pack(side="left", fill="y", padx=(0, 10))
 
     tk.Button(left_col, text="Charger la liste", command=load_modifiers).pack(fill="x", pady=(0, 6))
-    modifier_listbox = tk.Listbox(left_col, width=28, height=18)
-    modifier_listbox.pack(fill="y", expand=True)
+    listbox_container = tk.Frame(left_col)
+    listbox_container.pack(fill="both", expand=True)
+    sb_mod_h = tk.Scrollbar(listbox_container, orient="horizontal")
+    modifier_listbox = tk.Listbox(listbox_container, width=36, height=18,
+                                  xscrollcommand=sb_mod_h.set)
+    sb_mod_h.config(command=modifier_listbox.xview)
+    modifier_listbox.pack(fill="both", expand=True)
+    sb_mod_h.pack(fill="x")
     tk.Button(left_col, text="Charger le modifier", command=load_selected_modifier).pack(fill="x", pady=6)
 
     right_col = tk.Frame(top_row)

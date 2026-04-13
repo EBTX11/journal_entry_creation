@@ -163,6 +163,7 @@ def parse_je_data(je_path, loc_path, btn_path, pb_path, key):
         "is_shown_rows": [], "possible_rows": [],
         "complete_rows": [], "fail_rows": [],
         "buttons": [], "progress_bars": [], "status_desc": [],
+        "status_desc_trigger_var": "", "status_desc_trigger_values": [],
         "monthly_empty": False, "yearly": False,
         "goal_mode": False,
         "goal_global_var": "",
@@ -384,7 +385,11 @@ def parse_je_data(je_path, loc_path, btn_path, pb_path, key):
         ]:
             mm = re.search(pattern, loc_content, re.MULTILINE)
             if mm:
-                pb[field] = mm.group(1)
+                val = mm.group(1)
+                if field == "desc":
+                    # Enlève le suffix [GetGlobalVariable(...).GetValue|D]/ N pour ne garder que le texte brut
+                    val = re.sub(r'\s*\[GetGlobalVariable\([^)]+\)\.GetValue\|D\]/[^"]*', '', val).strip()
+                pb[field] = val
         if pb_content:
             pbb = extract_named_block(pb_content, pk)
             if pbb:
@@ -428,6 +433,17 @@ def parse_je_data(je_path, loc_path, btn_path, pb_path, key):
         n += 1
     data["status_desc"] = texts
 
+    # Status desc trigger — cherche dans le bloc JE
+    sd_block = extract_named_block(block, "status_desc") or ""
+    trig_m = re.search(r'global_var:(\S+)\s*=\s*\S+', sd_block)
+    if trig_m:
+        data["status_desc_trigger_var"] = trig_m.group(1)
+        data["status_desc_trigger_values"] = re.findall(
+            r'global_var:\S+\s*=\s*(\S+)', sd_block)
+    else:
+        data["status_desc_trigger_var"] = ""
+        data["status_desc_trigger_values"] = []
+
     return data
 
 
@@ -453,6 +469,10 @@ def patch_named_block_in(content, block_name, new_text):
     Si absent, insère new_text avant la dernière accolade fermante."""
     br = find_block_range(content, block_name)
     if br:
+        # Recule jusqu'au début de la ligne pour consommer les espaces de la ligne
+        line_start = content.rfind('\n', 0, br[0]) + 1
+        if content[line_start:br[0]].strip() == '':
+            return content[:line_start] + new_text + content[br[1]:]
         return content[:br[0]] + new_text + content[br[1]:]
     last = content.rfind('}')
     if last >= 0:
@@ -835,6 +855,47 @@ def build_manage_tab(parent, path_var, tag_var):
         features_data["buttons"]["_refresh"] = refresh_buttons
 
     def build_status_config(parent, key):
+        # ── Sélecteur de variable trigger ──
+        trigger_mode_var = tk.StringVar(value="none")
+        features_data["status_desc"]["trigger_mode"] = trigger_mode_var
+        trig_frame = ttk.Frame(parent)
+        trig_frame.pack(fill="x", pady=(0, 2))
+        ttk.Label(trig_frame, text="Trigger :").pack(side="left")
+        for lbl, val in [("Aucun", "none"), ("Nouvelle var globale", "new_var"),
+                          ("Var progress bar", "pb_var"), ("Champ libre", "custom")]:
+            tk.Radiobutton(trig_frame, text=lbl, variable=trigger_mode_var,
+                           value=val).pack(side="left", padx=2)
+
+        var_row_frame = ttk.Frame(parent)
+        ttk.Label(var_row_frame, text="Variable :", width=10, anchor="w").pack(side="left")
+        custom_var = tk.StringVar()
+        features_data["status_desc"]["trigger_custom_var"] = custom_var
+        trigger_entry = ttk.Entry(var_row_frame, textvariable=custom_var, width=46)
+        trigger_entry.pack(side="left", fill="x", expand=True)
+
+        def _on_trig_mode(*_):
+            mode = trigger_mode_var.get()
+            if mode == "none":
+                var_row_frame.pack_forget()
+            else:
+                var_row_frame.pack(fill="x", pady=2)
+                k = current_key_var.get()
+                if mode == "new_var":
+                    custom_var.set(f"{k}_global_variable_1" if k else "(chargez une JE)")
+                    trigger_entry.config(state="disabled")
+                elif mode == "pb_var":
+                    pb_rows = features_data["progress_bars"]["rows"]
+                    if pb_rows and k:
+                        custom_var.set(f"{k}_global_variable_progress_bar_{pb_rows[0]['pb_index']}")
+                    elif k:
+                        custom_var.set(f"{k}_global_variable_progress_bar_1")
+                    trigger_entry.config(state="normal")
+                else:
+                    trigger_entry.config(state="normal")
+
+        trigger_mode_var.trace_add("write", _on_trig_mode)
+
+        # ── Nombre de status_desc ──
         ttk.Label(parent, text="Nombre de status_desc (min 2) :").pack(anchor="w")
         num_var = tk.IntVar(value=2)
         status_rows_frame = ttk.Frame(parent)
@@ -846,11 +907,15 @@ def build_manage_tab(parent, path_var, tag_var):
             features_data["status_desc"]["rows"].clear()
             n = max(2, num_var.get())
             for i in range(1, n + 1):
-                row = ttk.Frame(status_rows_frame); row.pack(fill="x", pady=1)
+                row = ttk.Frame(status_rows_frame)
+                row.pack(fill="x", pady=1)
                 ttk.Label(row, text=f"Status {i} :").pack(side="left")
                 sv = tk.StringVar()
-                ttk.Entry(row, textvariable=sv, width=36).pack(side="left", padx=4)
-                features_data["status_desc"]["rows"].append(sv)
+                ttk.Entry(row, textvariable=sv, width=28).pack(side="left", padx=4)
+                ttk.Label(row, text="val=").pack(side="left")
+                vv = tk.StringVar(value=str(i))
+                ttk.Entry(row, textvariable=vv, width=5).pack(side="left")
+                features_data["status_desc"]["rows"].append({"text": sv, "value": vv})
 
         ttk.Spinbox(parent, from_=2, to=10, textvariable=num_var,
                     width=4, command=refresh_status).pack(anchor="w")
@@ -860,6 +925,14 @@ def build_manage_tab(parent, path_var, tag_var):
         features_data["status_desc"]["_num_var"]  = num_var
 
     def build_pb_config(parent, key):
+        pulse_var = tk.StringVar(value="monthly")
+        pulse_row = ttk.Frame(parent)
+        pulse_row.pack(fill="x", pady=2)
+        ttk.Label(pulse_row, text="Pulse :").pack(side="left")
+        tk.Radiobutton(pulse_row, text="on_monthly_pulse", variable=pulse_var, value="monthly").pack(side="left")
+        tk.Radiobutton(pulse_row, text="on_yearly_pulse",  variable=pulse_var, value="yearly").pack(side="left", padx=8)
+        features_data["progress_bars"]["pulse_var"] = pulse_var
+
         ttk.Label(parent, text="Nombre de progress bars :").pack(anchor="w")
         num_var = tk.IntVar(value=1)
         pb_rows_frame = ttk.Frame(parent)
@@ -1261,19 +1334,47 @@ def build_manage_tab(parent, path_var, tag_var):
                     f.write(loc_c)
 
             elif feat_key == "status_desc":
-                sd_list = [r.get() for r in features_data["status_desc"]["rows"] if r.get().strip()]
+                sd_rows = features_data["status_desc"]["rows"]
+                sd_list = [r["text"].get() for r in sd_rows if r["text"].get().strip()]
+                sd_values = [r["value"].get().strip() or str(i+1)
+                             for i, r in enumerate(sd_rows) if r["text"].get().strip()]
+                _tm = features_data["status_desc"].get("trigger_mode")
+                _mode = _tm.get() if _tm else "none"
+                if _mode == "none":
+                    _tvar = None
+                elif _mode == "new_var":
+                    _tvar = f"{key}_global_variable_1"
+                else:
+                    _cv = features_data["status_desc"].get("trigger_custom_var")
+                    _tvar = _cv.get().strip() if _cv else None
                 entries = ""
                 for i, text in enumerate(sd_list, start=1):
                     sk = f"{key}_status_desc_{i}"
+                    val = sd_values[i - 1] if i <= len(sd_values) else str(i)
+                    trig_inner = (f"\n                    global_var:{_tvar} = {val}\n"
+                                  f"                ") if _tvar else ""
                     entries += (
                         f"\n            triggered_desc = {{\n"
                         f"                desc = {sk}\n"
-                        f"                trigger = {{\n"
-                        f"                }}\n"
+                        f"                trigger = {{{trig_inner}}}\n"
                         f"            }}\n"
                     )
                 snippet = f"    status_desc = {{\n        first_valid = {{{entries}        }}\n    }}"
                 je_block = patch_named_block_in(je_block, "status_desc", snippet)
+                # History — nouvelle variable globale
+                if _mode == "new_var" and _tvar:
+                    _hist_sd = os.path.join(_base, "common/history/global/00_hmmai_global.txt")
+                    if os.path.exists(_hist_sd):
+                        _hsd = read_file(_hist_sd)
+                        if _tvar not in _hsd:
+                            _vi_sd = (f"\n    set_global_variable = {{\n"
+                                      f"        name = {_tvar}\n"
+                                      f"        value = 0\n    }}\n")
+                            _lb_sd = _hsd.rfind('}')
+                            if _lb_sd >= 0:
+                                _hsd = _hsd[:_lb_sd] + _vi_sd + _hsd[_lb_sd:]
+                                with open(_hist_sd, "w", encoding="utf-8") as f:
+                                    f.write(_hsd)
                 # Loc
                 loc_c = read_file(_loc_path) if os.path.exists(_loc_path) else "l_english:\n"
                 _safe = re.escape(key)
@@ -1284,11 +1385,15 @@ def build_manage_tab(parent, path_var, tag_var):
                     f.write(loc_c)
 
             elif feat_key == "progress_bars":
+                def _build_pb_desc(raw_desc, pb_idx, pb_max):
+                    gv  = f"{key}_global_variable_progress_bar_{pb_idx}"
+                    sfx = f"[GetGlobalVariable('{gv}').GetValue|D]/ {pb_max}"
+                    return (raw_desc + " " + sfx).strip() if raw_desc else sfx
                 pb_list = [{
                     "pb_index":    r["pb_index"],
                     "key":         f"{key}_{r['pb_index']}_progress_bar",
                     "name":        r["name"].get(),
-                    "desc":        r["desc"].get(),
+                    "desc":        _build_pb_desc(r["desc"].get(), r["pb_index"], r["max"].get()),
                     "color":       r["color"].get(),
                     "start":       r["start"].get(),
                     "min":         r["min"].get(),
@@ -1302,25 +1407,52 @@ def build_manage_tab(parent, path_var, tag_var):
                 je_block = re.sub(
                     rf'[ \t]*scripted_progress_bar\s*=\s*{safe_key}_\d+_progress_bar[ \t]*\n?',
                     '', je_block)
+                _pulse_v  = features_data["progress_bars"].get("pulse_var")
+                _pb_pulse = _pulse_v.get() if _pulse_v else "monthly"
                 if pb_list:
                     pb_lines = "".join(
                         f"    scripted_progress_bar = {pb['key']}\n" for pb in pb_list)
                     lb = je_block.rfind('}')
                     je_block = je_block[:lb] + pb_lines + je_block[lb:]
-                    monthly_inner = "".join(
+                    pb_pulse_inner = "".join(
                         f"\n            je:{key} ?= {{\n"
                         f"                set_bar_progress = {{\n"
-                        f"                    value = 0\n"
+                        f"                    value = global_var:{key}_global_variable_progress_bar_{pb['pb_index']}\n"
                         f"                    name = {pb['key']}\n"
                         f"                }}\n"
                         f"            }}\n"
                         for pb in pb_list)
-                    monthly_snip = (
-                        f"    on_monthly_pulse = {{\n"
-                        f"        effect = {{{monthly_inner}"
+                    _pulse_snip = (
+                        f"    on_{_pb_pulse}_pulse = {{\n"
+                        f"        effect = {{{pb_pulse_inner}"
                         f"        }}\n"
                         f"    }}")
-                    je_block = patch_named_block_in(je_block, "on_monthly_pulse", monthly_snip)
+                    je_block = patch_named_block_in(je_block, f"on_{_pb_pulse}_pulse", _pulse_snip)
+                    _other_pulse = "yearly" if _pb_pulse == "monthly" else "monthly"
+                    _other_br = find_block_range(je_block, f"on_{_other_pulse}_pulse")
+                    if _other_br:
+                        je_block = je_block[:_other_br[0]].rstrip() + "\n" + je_block[_other_br[1]:]
+                # Variables globales → history
+                _hist_path = os.path.join(_base, "common/history/global/00_hmmai_global.txt")
+                if os.path.exists(_hist_path) and pb_list:
+                    _hist = read_file(_hist_path)
+                    _hist_changed = False
+                    for pb in pb_list:
+                        _gv = f"{key}_global_variable_progress_bar_{pb['pb_index']}"
+                        if _gv not in _hist:
+                            _var_init = (
+                                f"\n    set_global_variable = {{\n"
+                                f"        name = {_gv}\n"
+                                f"        value = 0\n"
+                                f"    }}\n"
+                            )
+                            _last_b = _hist.rfind('}')
+                            if _last_b >= 0:
+                                _hist = _hist[:_last_b] + _var_init + _hist[_last_b:]
+                                _hist_changed = True
+                    if _hist_changed:
+                        with open(_hist_path, "w", encoding="utf-8") as f:
+                            f.write(_hist)
                 # Fichier PB
                 pb_c = read_file(_pb_path) if os.path.exists(_pb_path) else ""
                 pb_c = remove_blocks_for_key(pb_c, f"{key}_")
@@ -1335,6 +1467,7 @@ def build_manage_tab(parent, path_var, tag_var):
                 loc_c = read_file(_loc_path) if os.path.exists(_loc_path) else "l_english:\n"
                 _safe = re.escape(key)
                 loc_c = re.sub(rf'[ \t]*{_safe}_\d+_progress_bar[^\n]*\n', '', loc_c)
+                loc_c = re.sub(rf'[ \t]*{_safe}_tt_complete_1[^\n]*\n', '', loc_c)
                 for pb in pb_list:
                     loc_c += f'  {pb["key"]}:0 "{pb["name"]}"\n'
                     loc_c += f'  {pb["key"]}_desc:0 "{pb["desc"]}"\n'
@@ -1443,37 +1576,55 @@ def build_manage_tab(parent, path_var, tag_var):
         if not messagebox.askyesno("Confirmation", f"Supprimer {key} et toutes ses données liées ?"):
             return
 
-        je_path  = os.path.join(base_path, "common/journal_entries", f"{tag}.txt")
-        loc_path = os.path.join(base_path, "localization/english", "01_hmmf_je_localization_l_english.yml")
-        btn_path = os.path.join(base_path, "common/scripted_buttons", f"{tag}.txt")
-        pb_path  = os.path.join(base_path, "common/scripted_progress_bars", "hmmf_progressbar.txt")
+        je_path   = os.path.join(base_path, "common/journal_entries", f"{tag}.txt")
+        loc_path  = os.path.join(base_path, "localization/english", "01_hmmf_je_localization_l_english.yml")
+        btn_path  = os.path.join(base_path, "common/scripted_buttons", f"{tag}.txt")
+        pb_path   = os.path.join(base_path, "common/scripted_progress_bars", "hmmf_progressbar.txt")
+        hist_path = os.path.join(base_path, "common/history/global/00_hmmai_global.txt")
 
         try:
+            # ── Journal Entry ──
             je_content = read_file(je_path)
             br = find_block_range(je_content, key)
             if br:
                 je_content = (je_content[:br[0]] + je_content[br[1]:]).strip()
-                if je_content or os.path.exists(je_path):
-                    with open(je_path, "w", encoding="utf-8") as f:
-                        f.write(je_content + ("\n" if je_content else ""))
+                with open(je_path, "w", encoding="utf-8") as f:
+                    f.write(je_content + ("\n" if je_content else ""))
 
+            # ── Localisation (titre, desc, PBs, boutons, status_desc, tt_complete…) ──
             loc_content = read_file(loc_path) if os.path.exists(loc_path) else ""
             if loc_content:
                 loc_content = remove_loc_entries(loc_content, key)
                 with open(loc_path, "w", encoding="utf-8") as f:
                     f.write(loc_content.rstrip() + "\n")
 
+            # ── Scripted buttons ──
             btn_content = read_file(btn_path) if os.path.exists(btn_path) else ""
             btn_content = remove_blocks_for_key(btn_content, f"{key}_button_")
             if btn_content.strip() or os.path.exists(btn_path):
                 with open(btn_path, "w", encoding="utf-8") as f:
                     f.write(btn_content + ("\n" if btn_content else ""))
 
+            # ── Scripted progress bars ──
             pb_content = read_file(pb_path) if os.path.exists(pb_path) else ""
             pb_content = remove_blocks_for_key(pb_content, f"{key}_")
             if pb_content.strip() or os.path.exists(pb_path):
                 with open(pb_path, "w", encoding="utf-8") as f:
                     f.write(pb_content + ("\n" if pb_content else ""))
+
+            # ── Variables globales dans l'historique ──
+            # Supprime les blocs  set_global_variable = { name = {key}_global_variable_... }
+            if os.path.exists(hist_path):
+                hist_content = read_file(hist_path)
+                safe_key = re.escape(key)
+                cleaned = re.sub(
+                    rf'\n[ \t]*set_global_variable\s*=\s*\{{[^{{}}]*name\s*=\s*{safe_key}_global_variable[^{{}}]*\}}',
+                    '',
+                    hist_content,
+                )
+                if cleaned != hist_content:
+                    with open(hist_path, "w", encoding="utf-8") as f:
+                        f.write(cleaned)
 
             je_listbox.delete(sel[0])
             clear_loaded_je()
@@ -1641,7 +1792,28 @@ def build_manage_tab(parent, path_var, tag_var):
             features_data["status_desc"]["_refresh"]()
             for i, txt in enumerate(d["status_desc"]):
                 if i < len(features_data["status_desc"]["rows"]):
-                    features_data["status_desc"]["rows"][i].set(txt)
+                    features_data["status_desc"]["rows"][i]["text"].set(txt)
+            # Rétablir le trigger
+            _tvar_d = d.get("status_desc_trigger_var", "")
+            _tvals_d = d.get("status_desc_trigger_values", [])
+            if _tvar_d:
+                _tm_fd = features_data["status_desc"].get("trigger_mode")
+                _cv_fd = features_data["status_desc"].get("trigger_custom_var")
+                if _tm_fd:
+                    _k = current_key_var.get()
+                    if _tvar_d == f"{_k}_global_variable_1":
+                        _tm_fd.set("new_var")
+                    elif "_global_variable_progress_bar_" in _tvar_d:
+                        _tm_fd.set("pb_var")
+                        if _cv_fd:
+                            _cv_fd.set(_tvar_d)
+                    else:
+                        _tm_fd.set("custom")
+                        if _cv_fd:
+                            _cv_fd.set(_tvar_d)
+            for i, row in enumerate(features_data["status_desc"]["rows"]):
+                if i < len(_tvals_d):
+                    row["value"].set(_tvals_d[i])
 
         # ── Progress bars ──
         if d["progress_bars"]:
@@ -1813,21 +1985,40 @@ def build_manage_tab(parent, path_var, tag_var):
                 })
 
         # ── Status desc ──
-        status_desc_list = None
+        status_desc_list   = None
+        status_desc_tvar   = None
+        status_desc_tvals  = []
         if features_data["status_desc"]["enabled"].get():
-            status_desc_list = [r.get() for r in features_data["status_desc"]["rows"] if r.get().strip()]
+            _sd_rows = features_data["status_desc"]["rows"]
+            status_desc_list = [r["text"].get() for r in _sd_rows if r["text"].get().strip()]
+            status_desc_tvals = [r["value"].get().strip() or str(i + 1)
+                                 for i, r in enumerate(_sd_rows) if r["text"].get().strip()]
+            _stm = features_data["status_desc"].get("trigger_mode")
+            _smode = _stm.get() if _stm else "none"
+            if _smode == "new_var":
+                status_desc_tvar = f"{key}_global_variable_1"
+            elif _smode in ("pb_var", "custom"):
+                _scv = features_data["status_desc"].get("trigger_custom_var")
+                status_desc_tvar = _scv.get().strip() if _scv else None
+            else:
+                status_desc_tvar = None
 
         # ── Progress bars ──
         progress_bars = None
         if features_data["progress_bars"]["enabled"].get():
             progress_bars = []
             for r in features_data["progress_bars"]["rows"]:
-                pb_key = f"{key}_{r['pb_index']}_progress_bar"
+                pb_key   = f"{key}_{r['pb_index']}_progress_bar"
+                _gv_key  = f"{key}_global_variable_progress_bar_{r['pb_index']}"
+                _mx      = r["max"].get()
+                _sfx     = f"[GetGlobalVariable('{_gv_key}').GetValue|D]/ {_mx}"
+                _rd      = r["desc"].get()
                 progress_bars.append({
                     "pb_index": r["pb_index"], "key": pb_key,
-                    "name": r["name"].get(), "desc": r["desc"].get(),
+                    "name": r["name"].get(),
+                    "desc": (_rd + " " + _sfx).strip() if _rd else _sfx,
                     "color": r["color"].get(),
-                    "start": r["start"].get(), "min": r["min"].get(), "max": r["max"].get(),
+                    "start": r["start"].get(), "min": r["min"].get(), "max": _mx,
                     "is_inverted":   r["is_inverted"].get(),
                     "second_desc":   r["second_desc"].get(),
                     "monthly_value": r["monthly_value"].get().strip() or None,
@@ -1897,22 +2088,43 @@ def build_manage_tab(parent, path_var, tag_var):
                     entries = ""
                     for i, text in enumerate(status_desc_list, start=1):
                         sk = f"{key}_status_desc_{i}"
+                        val = (status_desc_tvals[i - 1]
+                               if status_desc_tvals and i <= len(status_desc_tvals) else str(i))
+                        trig_in = (f"\n                    global_var:{status_desc_tvar} = {val}\n"
+                                   f"                ") if status_desc_tvar else ""
                         entries += (
                             f"\n            triggered_desc = {{\n"
                             f"                desc = {sk}\n"
-                            f"                trigger = {{\n"
-                            f"                }}\n"
+                            f"                trigger = {{{trig_in}}}\n"
                             f"            }}\n"
                         )
                     snippet = f"    status_desc = {{\n        first_valid = {{{entries}        }}\n    }}"
                     je_block = patch_named_block_in(je_block, "status_desc", snippet)
+                    # History — nouvelle variable globale
+                    if status_desc_tvar:
+                        _stm2 = features_data["status_desc"].get("trigger_mode")
+                        if _stm2 and _stm2.get() == "new_var":
+                            _hp2 = os.path.join(base_path, "common/history/global/00_hmmai_global.txt")
+                            if os.path.exists(_hp2):
+                                _hc2 = read_file(_hp2)
+                                if status_desc_tvar not in _hc2:
+                                    _vi2 = (f"\n    set_global_variable = {{\n"
+                                            f"        name = {status_desc_tvar}\n"
+                                            f"        value = 0\n    }}\n")
+                                    _lb2 = _hc2.rfind('}')
+                                    if _lb2 >= 0:
+                                        _hc2 = _hc2[:_lb2] + _vi2 + _hc2[_lb2:]
+                                        with open(_hp2, "w", encoding="utf-8") as f:
+                                            f.write(_hc2)
 
-                # Progress bars (lignes scripted_progress_bar + on_monthly_pulse)
+                # Progress bars (lignes scripted_progress_bar + pulse)
                 if features_data["progress_bars"]["enabled"].get():
                     je_block = re.sub(
                         rf'[ \t]*scripted_progress_bar\s*=\s*{safe_key}_\d+_progress_bar[ \t]*\n?', '',
                         je_block
                     )
+                    _pv  = features_data["progress_bars"].get("pulse_var")
+                    _pbn = _pv.get() if _pv else "monthly"
                     if progress_bars:
                         pb_lines = "".join(
                             f"    scripted_progress_bar = {pb['key']}\n"
@@ -1920,23 +2132,47 @@ def build_manage_tab(parent, path_var, tag_var):
                         )
                         last_brace = je_block.rfind('}')
                         je_block = je_block[:last_brace] + pb_lines + je_block[last_brace:]
-                        # Mise à jour on_monthly_pulse pour réinitialiser les PB
-                        monthly_inner = "".join(
+                        _pb_inner = "".join(
                             f"\n            je:{key} ?= {{\n"
                             f"                set_bar_progress = {{\n"
-                            f"                    value = 0\n"
+                            f"                    value = global_var:{key}_global_variable_progress_bar_{pb['pb_index']}\n"
                             f"                    name = {pb['key']}\n"
                             f"                }}\n"
                             f"            }}\n"
                             for pb in progress_bars
                         )
-                        monthly_snip = (
-                            f"    on_monthly_pulse = {{\n"
-                            f"        effect = {{{monthly_inner}"
+                        _pb_snip = (
+                            f"    on_{_pbn}_pulse = {{\n"
+                            f"        effect = {{{_pb_inner}"
                             f"        }}\n"
                             f"    }}"
                         )
-                        je_block = patch_named_block_in(je_block, "on_monthly_pulse", monthly_snip)
+                        je_block = patch_named_block_in(je_block, f"on_{_pbn}_pulse", _pb_snip)
+                        _oth = "yearly" if _pbn == "monthly" else "monthly"
+                        _oth_br = find_block_range(je_block, f"on_{_oth}_pulse")
+                        if _oth_br:
+                            je_block = je_block[:_oth_br[0]].rstrip() + "\n" + je_block[_oth_br[1]:]
+                    # Variables globales → history
+                    _hist_p = os.path.join(base_path, "common/history/global/00_hmmai_global.txt")
+                    if os.path.exists(_hist_p) and progress_bars:
+                        _hc = read_file(_hist_p)
+                        _hchg = False
+                        for pb in progress_bars:
+                            _gvn = f"{key}_global_variable_progress_bar_{pb['pb_index']}"
+                            if _gvn not in _hc:
+                                _vi = (
+                                    f"\n    set_global_variable = {{\n"
+                                    f"        name = {_gvn}\n"
+                                    f"        value = 0\n"
+                                    f"    }}\n"
+                                )
+                                _lb2 = _hc.rfind('}')
+                                if _lb2 >= 0:
+                                    _hc = _hc[:_lb2] + _vi + _hc[_lb2:]
+                                    _hchg = True
+                        if _hchg:
+                            with open(_hist_p, "w", encoding="utf-8") as f:
+                                f.write(_hc)
 
                 # on_monthly_pulse vide (seulement si pas de PB activées)
                 if features_data["monthly_empty"]["enabled"].get() \
@@ -2023,17 +2259,37 @@ def build_manage_tab(parent, path_var, tag_var):
                 return
 
             # ══ MODE COMPLET : nouvelle JE (bloc absent) ═════════════════
+            _cpv = features_data["progress_bars"].get("pulse_var")
             options = {
-                "buttons":             num_buttons,
-                "progress_bars":       progress_bars,
-                "status_desc":         status_desc_list,
-                "monthly_empty":       features_data["monthly_empty"]["enabled"].get(),
-                "yearly":              features_data["yearly"]["enabled"].get(),
-                "is_shown":            is_shown_list,
-                "possible_conditions": possible_cond,
-                "complete_conditions": complete_cond,
-                "fail_conditions":     fail_cond,
+                "buttons":                  num_buttons,
+                "progress_bars":            progress_bars,
+                "pb_pulse":                 _cpv.get() if _cpv else "monthly",
+                "status_desc":              status_desc_list,
+                "status_desc_trigger_var":  status_desc_tvar,
+                "status_desc_trigger_vals": status_desc_tvals,
+                "monthly_empty":            features_data["monthly_empty"]["enabled"].get(),
+                "yearly":                   features_data["yearly"]["enabled"].get(),
+                "is_shown":                 is_shown_list,
+                "possible_conditions":      possible_cond,
+                "complete_conditions":      complete_cond,
+                "fail_conditions":          fail_cond,
             }
+            # History — nouvelle variable globale status_desc
+            if status_desc_tvar:
+                _stm3 = features_data["status_desc"].get("trigger_mode")
+                if _stm3 and _stm3.get() == "new_var":
+                    _hp3 = os.path.join(base_path, "common/history/global/00_hmmai_global.txt")
+                    if os.path.exists(_hp3):
+                        _hc3 = read_file(_hp3)
+                        if status_desc_tvar not in _hc3:
+                            _vi3 = (f"\n    set_global_variable = {{\n"
+                                    f"        name = {status_desc_tvar}\n"
+                                    f"        value = 0\n    }}\n")
+                            _lb3b = _hc3.rfind('}')
+                            if _lb3b >= 0:
+                                _hc3 = _hc3[:_lb3b] + _vi3 + _hc3[_lb3b:]
+                                with open(_hp3, "w", encoding="utf-8") as f:
+                                    f.write(_hc3)
 
             new_je_block = generate_je_block(je, options)
 
@@ -2072,6 +2328,29 @@ def build_manage_tab(parent, path_var, tag_var):
             if pb_content.strip() or os.path.exists(pb_path):
                 with open(pb_path, "w", encoding="utf-8") as f:
                     f.write(pb_content)
+
+            # ── History : variables globales des progress bars ──
+            if progress_bars:
+                _hn = os.path.join(base_path, "common/history/global/00_hmmai_global.txt")
+                if os.path.exists(_hn):
+                    _hct = read_file(_hn)
+                    _hchg2 = False
+                    for pb in progress_bars:
+                        _gvk = f"{key}_global_variable_progress_bar_{pb['pb_index']}"
+                        if _gvk not in _hct:
+                            _vi2 = (
+                                f"\n    set_global_variable = {{\n"
+                                f"        name = {_gvk}\n"
+                                f"        value = 0\n"
+                                f"    }}\n"
+                            )
+                            _lb3 = _hct.rfind('}')
+                            if _lb3 >= 0:
+                                _hct = _hct[:_lb3] + _vi2 + _hct[_lb3:]
+                                _hchg2 = True
+                    if _hchg2:
+                        with open(_hn, "w", encoding="utf-8") as f:
+                            f.write(_hct)
 
             messagebox.showinfo("Succès", f"{key} sauvegardée avec succès !")
 
