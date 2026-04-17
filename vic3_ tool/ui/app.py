@@ -65,14 +65,14 @@ class EBTXApp:
         # Topbar
         self.topbar = TopBar(right_container, self.path_var, self.tag_var)
         
-        # Zone de contenu principal
+        # Zone de contenu principal (cadre pour les vues)
         self.content_frame = ttk.Frame(right_container)
         self.content_frame.pack(fill="both", expand=True, padx=10, pady=10)
     
     def _build_views(self):
-        """Cree les vues de l'application"""
+        """Cree les vues de l'application (une par categorie)"""
         
-        # Vue "Journal Entry" - les deux onglets fusionnes
+        # Vue "Journal Entry" - avec les deux onglets fusionnes
         journal_entry_frame = ttk.Frame(self.content_frame)
         
         # Creer un mini-notebook pour Journal Entry seulement
@@ -123,7 +123,7 @@ class EBTXApp:
         self.sidebar.set_active(key)
 
 
-# Instance racine globale
+# Instance racine globale pour la compatibilite avec run_ app.py
 root = tk.Tk()
 app = EBTXApp(root)
 
